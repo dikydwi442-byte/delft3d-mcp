@@ -577,6 +577,50 @@ impl GridData {
             self.y.copy_from_slice(&next_y);
         }
     }
+
+    /// Affine transform (shift, scale, rotate around origin) on all active grid nodes.
+    pub fn transform(&mut self, dx: f64, dy: f64, scale_x: f64, scale_y: f64, rotate_deg: f64) {
+        let th = rotate_deg.to_radians();
+        let c = th.cos();
+        let s = th.sin();
+        for idx in 0..self.x.len() {
+            if self.is_missing(idx) {
+                continue;
+            }
+            let x_s = self.x[idx] * scale_x;
+            let y_s = self.y[idx] * scale_y;
+            self.x[idx] = x_s * c - y_s * s + dx;
+            self.y[idx] = x_s * s + y_s * c + dy;
+        }
+    }
+
+    /// Mask (set to `missing_value`) nodes inside or outside a 1-based [m1..=m2, n1..=n2] block.
+    pub fn mask_block(
+        &mut self,
+        m1: usize,
+        m2: usize,
+        n1: usize,
+        n2: usize,
+        interior: bool,
+    ) -> usize {
+        let mut masked = 0_usize;
+        for n in 0..self.n_max {
+            let n_1 = n + 1;
+            for m in 0..self.m_max {
+                let m_1 = m + 1;
+                let inside = m_1 >= m1 && m_1 <= m2 && n_1 >= n1 && n_1 <= n2;
+                if (interior && inside) || (!interior && !inside) {
+                    let idx = n * self.m_max + m;
+                    if !self.is_missing(idx) {
+                        self.x[idx] = self.missing_value;
+                        self.y[idx] = self.missing_value;
+                        masked += 1;
+                    }
+                }
+            }
+        }
+        masked
+    }
 }
 
 fn resample_polyline(pts: &[[f64; 2]], count: usize) -> Result<Vec<[f64; 2]>, GrdError> {

@@ -82,7 +82,7 @@ def main() -> int:
             indent=2,
         )
     )
-    assert len(tools) == 45, f"Expected 45 tools, got {len(tools)}"
+    assert len(tools) == 48, f"Expected 48 tools, got {len(tools)}"
     assert len(resources) >= 4
     assert len(prompts) == 3
     return 0

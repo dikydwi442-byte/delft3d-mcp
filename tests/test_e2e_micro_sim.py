@@ -124,3 +124,9 @@ def test_e2e_micro_flow_simulation_and_nefis(tmp_path: Path) -> None:
     assert "map-series" in [g["name"] for g in groups_map]
     s1 = _core.nefis_read_element(str(trim_dat), "map-series", "S1", None, 0, 1)
     assert len(s1["values"]) == 36
+
+    from delft3d_mcp.post.extract import export_nefis_to_netcdf
+
+    nc_out = work_dir / "micro_trim.nc"
+    nc_res = export_nefis_to_netcdf(trim_dat, nc_out, _core, groups=["map-series"])
+    assert nc_out.exists() and nc_res["exported_count"] > 0

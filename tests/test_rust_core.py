@@ -93,3 +93,16 @@ def test_tekal_curvilinear_tfi_and_orthogonalize(tmp_path: Path) -> None:
     ortho_grd = tmp_path / "curv_ortho.grd"
     imp = _core.orthogonalize_grd(str(grd), str(ortho_grd), 40, 0.8)
     assert imp["after_mean_abs_cos"] <= imp["before_mean_abs_cos"] + 1e-6
+
+    trans_grd = tmp_path / "curv_shift.grd"
+    _core.transform_grd(str(ortho_grd), str(trans_grd), 500.0, 200.0, 1.0, 1.0, 0.0)
+    masked_cnt = _core.mask_grd_block(str(trans_grd), str(trans_grd), 1, 2, 1, 2, True)
+    assert masked_cnt == 4
+
+    xyz = tmp_path / "avg.xyz"
+    xyz.write_text("0 0 4.0\n1 1 6.0\n", encoding="utf-8")
+    _core.create_rect_grd(str(grd), 0.0, 0.0, 10.0, 10.0, 3, 3, 0.0, "Cartesian")
+    dep_avg = tmp_path / "avg.dep"
+    assert _core.interpolate_xyz(str(grd), str(xyz), str(dep_avg), "cell_average", 2.0, 5.0, 4) == 9
+    avg_vals = _core.read_dep_file(str(dep_avg), 3, 3)
+    assert abs(avg_vals[0] - 5.0) < 1e-6

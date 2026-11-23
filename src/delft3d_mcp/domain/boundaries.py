@@ -101,3 +101,60 @@ def format_wnd_file(records: list[dict[str, float]]) -> str:
         for r in records
     ]
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def format_bcc_file(
+    tables: list[dict[str, Any]],
+    reference_time: int = 20260101,
+    time_unit: str = "minutes",
+) -> str:
+    """Format Delft3D-FLOW .bcc constituent/transport boundary time-series file."""
+    return format_bct_file(tables, reference_time=reference_time, time_unit=time_unit)
+
+
+def format_bch_file(
+    frequencies_deg_per_hr: list[float],
+    amplitudes_end_a: list[list[float]],
+    amplitudes_end_b: list[list[float]],
+    phases_end_a: list[list[float]],
+    phases_end_b: list[list[float]],
+    z0_per_boundary: list[float] | None = None,
+) -> str:
+    """Format Delft3D-FLOW .bch harmonic boundary file."""
+    lines: list[str] = ["  ".join(f"{f:>12.6f}" for f in frequencies_deg_per_hr), ""]
+    z0s = z0_per_boundary or [0.0] * len(amplitudes_end_a)
+    lines.append("  ".join(f"{z:>12.6f}" for z in z0s))
+    lines.append("")
+    for block in (amplitudes_end_a, amplitudes_end_b, phases_end_a, phases_end_b):
+        for row in block:
+            lines.append("  ".join(f"{v:>12.6f}" for v in row))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def format_src_dis_files(
+    discharges: list[dict[str, Any]],
+    reference_time: int = 20260101,
+    time_unit: str = "minutes",
+) -> tuple[str, str]:
+    """Generate linked .src (location) and .dis (time-series) files for Delft3D-FLOW."""
+    src_lines: list[str] = []
+    dis_tables: list[dict[str, Any]] = []
+    for d in discharges:
+        name = str(d["name"])[:20]
+        m, n, k = int(d["m"]), int(d["n"]), int(d.get("k", 1))
+        interp = str(d.get("interpolation", "N")).upper()[:1]
+        src_lines.append(f"{name:<20} {interp} {m:>5} {n:>5} {k:>5}")
+        dis_tables.append(
+            {
+                "location": name,
+                "contents": "Uniform",
+                "param_a": "discharge           ",
+                "param_b": "discharge (end B)   ",
+                "unit": "[m3/s]",
+                "records": d.get("records", [[0.0, 0.0, 0.0]]),
+            }
+        )
+    src_txt = "\n".join(src_lines) + ("\n" if src_lines else "")
+    dis_txt = format_bct_file(dis_tables, reference_time=reference_time, time_unit=time_unit)
+    return src_txt, dis_txt

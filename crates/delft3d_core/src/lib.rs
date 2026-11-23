@@ -186,6 +186,45 @@ fn write_tekal_file(path: &str, features: Vec<(String, Vec<[f64; 2]>)>) -> PyRes
 }
 
 #[pyfunction]
+#[pyo3(signature = (src_grd_path, dst_grd_path, dx=0.0, dy=0.0, scale_x=1.0, scale_y=1.0, rotate_deg=0.0))]
+fn transform_grd(
+    src_grd_path: &str,
+    dst_grd_path: &str,
+    dx: f64,
+    dy: f64,
+    scale_x: f64,
+    scale_y: f64,
+    rotate_deg: f64,
+) -> PyResult<()> {
+    let mut g = GridData::from_file(Path::new(src_grd_path)).map_err(to_py_err)?;
+    g.transform(dx, dy, scale_x, scale_y, rotate_deg);
+    g.to_file(Path::new(dst_grd_path)).map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(signature = (src_grd_path, dst_grd_path, m1, m2, n1, n2, interior=true))]
+#[allow(clippy::too_many_arguments)]
+fn mask_grd_block(
+    src_grd_path: &str,
+    dst_grd_path: &str,
+    m1: usize,
+    m2: usize,
+    n1: usize,
+    n2: usize,
+    interior: bool,
+) -> PyResult<usize> {
+    let mut g = GridData::from_file(Path::new(src_grd_path)).map_err(to_py_err)?;
+    let cnt = g.mask_block(m1, m2, n1, n2, interior);
+    g.to_file(Path::new(dst_grd_path)).map_err(to_py_err)?;
+    Ok(cnt)
+}
+
+#[pyfunction]
+fn read_xyz_file(path: &str) -> PyResult<Vec<[f64; 3]>> {
+    read_xyz(Path::new(path)).map_err(to_py_err)
+}
+
+#[pyfunction]
 fn check_grd_quality(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     let g = GridData::from_file(Path::new(path)).map_err(to_py_err)?;
     let q = g.quality_metrics();
@@ -346,6 +385,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(orthogonalize_grd, m)?)?;
     m.add_function(wrap_pyfunction!(read_tekal_file, m)?)?;
     m.add_function(wrap_pyfunction!(write_tekal_file, m)?)?;
+    m.add_function(wrap_pyfunction!(transform_grd, m)?)?;
+    m.add_function(wrap_pyfunction!(mask_grd_block, m)?)?;
+    m.add_function(wrap_pyfunction!(read_xyz_file, m)?)?;
     m.add_function(wrap_pyfunction!(check_grd_quality, m)?)?;
     m.add_function(wrap_pyfunction!(read_enc, m)?)?;
     m.add_function(wrap_pyfunction!(write_enc, m)?)?;

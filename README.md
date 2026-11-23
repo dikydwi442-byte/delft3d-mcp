@@ -5,12 +5,12 @@ Production-grade **Hybrid Polyglot Model Context Protocol (MCP)** server for **D
 ## Architecture
 
 1. **Rust PyO3 Core (`delft3d_core` via `maturin` + `rayon` + `memmap2`)**
-   - Fast parser/writer for RGFGRID (`.grd`, `.enc`), TEKAL (`.ldb`, `.spl`, `.pol`), Transfinite Interpolation (TFI) curvilinear grid generator, Winslow elliptic grid orthogonalizer, and parallel grid quality metrics.
-   - Parallel QUICKIN (`.dep`, `.xyz`) IDW/nearest interpolation and Laplace smoothing/gap filling.
-   - Native memory-mapped NEFIS binary reader (`.dat`/`.def` for `trim-*`, `trih-*`, `wavm-*`).
+   - Fast parser/writer for RGFGRID (`.grd`, `.enc`), TEKAL (`.ldb`, `.spl`, `.pol`), Transfinite Interpolation (TFI) curvilinear grid generator, Winslow elliptic grid orthogonalizer, affine transforms/masking, and parallel grid quality metrics.
+   - Parallel QUICKIN (`.dep`, `.xyz`) IDW, nearest, cell-averaging, TIN interpolation, Laplace smoothing/gap filling, volumes/areas, and depth combining.
+   - Native memory-mapped NEFIS binary reader (`.dat`/`.def` for `trim-*`, `trih-*`, `wavm-*`) + CF-friendly NetCDF4 export.
    - Non-blocking `tri-diag` / log scanner.
 2. **Python 3.12 MCP Host (`fastmcp` + `numpy`/`scipy`/`netCDF4`/`pydantic`)**
-   - 45 modular tools across 7 Delft3D domains + 4 resources + 3 workflow prompts.
+   - 48 modular tools across 7 Delft3D domains + 4 resources + 3 workflow prompts.
    - Strict Workspace Sandbox Guard, Atomic Writes, Timestamped Auto-Backups & Rollback.
    - Zero `stdout` leakage (all logs routed to `stderr` + rotating log file; subprocesses write to job logs).
 3. **Direct Native Kernel Runner & Smart Windows GUI Bridge**

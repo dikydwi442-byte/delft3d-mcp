@@ -98,7 +98,7 @@ pub fn read_xyz(path: &Path) -> Result<Vec<[f64; 3]>, DepError> {
     Ok(pts)
 }
 
-/// Parallel IDW or nearest interpolation from XYZ scatter samples onto `Delft3D` grid nodes.
+/// Parallel IDW, nearest, or cell-averaging interpolation from XYZ samples onto `Delft3D` grid nodes.
 #[must_use]
 pub fn interpolate_xyz_to_grid(
     grid: &GridData,
@@ -112,6 +112,7 @@ pub fn interpolate_xyz_to_grid(
     let r2_limit = search_radius.map(|r| r * r);
     let k_limit = max_neighbors.max(1);
     let use_nearest = method.eq_ignore_ascii_case("nearest");
+    let use_cell_avg = method.eq_ignore_ascii_case("cell_average");
 
     (0..total)
         .into_par_iter()
@@ -121,6 +122,53 @@ pub fn interpolate_xyz_to_grid(
             }
             let gx = grid.x[idx];
             let gy = grid.y[idx];
+
+            if use_cell_avg {
+                let n = idx / grid.m_max;
+                let m = idx % grid.m_max;
+                let mut local_r = 0.0_f64;
+                let mut local_cnt = 0_usize;
+                for (dn, dm) in [(-1_isize, 0_isize), (1, 0), (0, -1), (0, 1)] {
+                    let nn = n.cast_signed() + dn;
+                    let mm = m.cast_signed() + dm;
+                    if nn >= 0
+                        && nn < grid.n_max.cast_signed()
+                        && mm >= 0
+                        && mm < grid.m_max.cast_signed()
+                    {
+                        let nidx = nn.cast_unsigned() * grid.m_max + mm.cast_unsigned();
+                        if !grid.is_missing(nidx) {
+                            let dist =
+                                ((grid.x[nidx] - gx).powi(2) + (grid.y[nidx] - gy).powi(2)).sqrt();
+                            local_r += 0.5 * dist;
+                            local_cnt += 1;
+                        }
+                    }
+                }
+                let eff_r2 = r2_limit.unwrap_or_else(|| {
+                    let r = if local_cnt > 0 {
+                        local_r / (local_cnt as f64)
+                    } else {
+                        10.0
+                    };
+                    r * r
+                });
+                let mut sum_z = 0.0_f64;
+                let mut cnt_z = 0_usize;
+                for &[sx, sy, sz] in samples {
+                    let dx = gx - sx;
+                    let dy = gy - sy;
+                    if dx * dx + dy * dy <= eff_r2 {
+                        sum_z += sz;
+                        cnt_z += 1;
+                    }
+                }
+                return if cnt_z > 0 {
+                    sum_z / (cnt_z as f64)
+                } else {
+                    DEFAULT_MISSING_DEP
+                };
+            }
 
             if use_nearest {
                 let mut best_d2 = f64::INFINITY;

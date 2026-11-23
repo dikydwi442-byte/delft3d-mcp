@@ -13,10 +13,13 @@ from fastmcp import FastMCP
 from delft3d_mcp.backup import atomic_write_text, create_backup, list_backups, restore_backup
 from delft3d_mcp.config import Delft3DPaths, WorkspaceRegistry
 from delft3d_mcp.domain.boundaries import (
+    format_bcc_file,
+    format_bch_file,
     format_bct_file,
     format_bnd_file,
     format_crs_file,
     format_obs_file,
+    format_src_dis_files,
     format_wnd_file,
 )
 from delft3d_mcp.domain.mdf import (
@@ -27,7 +30,12 @@ from delft3d_mcp.domain.mdf import (
     format_thin_dams,
     parse_ini_blocks,
 )
-from delft3d_mcp.domain.tide_wes import build_tide_analysis_input, build_wes_input
+from delft3d_mcp.domain.tide_wes import (
+    build_rtc_config,
+    build_tide_analysis_input,
+    build_wes_input,
+    harmonic_fit_and_predict,
+)
 from delft3d_mcp.domain.waq_part import (
     build_part_inp,
     list_waq_processes_from_install,
@@ -41,7 +49,12 @@ from delft3d_mcp.gui.win32_bridge import (
     launch_gui_module,
     list_delft3d_windows,
 )
-from delft3d_mcp.post.extract import extract_nefis_slice, list_nefis_groups
+from delft3d_mcp.post.extract import (
+    compute_skill_metrics,
+    export_nefis_to_netcdf,
+    extract_nefis_slice,
+    list_nefis_groups,
+)
 from delft3d_mcp.post.gis import export_grid_geojson
 from delft3d_mcp.post.quickplot import render_grid_and_bathy_png, render_timeseries_png
 from delft3d_mcp.runner.job_manager import JobManager
@@ -368,6 +381,45 @@ def grid_orthogonalize(
     return res
 
 
+@mcp.tool()
+def grid_transform_or_mask(
+    src_grd_path: str,
+    dst_grd_path: str | None = None,
+    dx: float = 0.0,
+    dy: float = 0.0,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    rotate_deg: float = 0.0,
+    mask_block: list[int] | None = None,
+    mask_interior: bool = True,
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """Shift/scale/rotate a .grd mesh or mask (delete) nodes inside/outside [m1, m2, n1, n2]."""
+    src, ws_root = ctx().registry.resolve_safe_path(src_grd_path, workspace=workspace, must_exist=True)
+    dst, _ = (
+        ctx().registry.resolve_safe_path(dst_grd_path, workspace=workspace)
+        if dst_grd_path
+        else (src, ws_root)
+    )
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    create_backup(dst, ws_root, label="grid_transform")
+    core = _get_core()
+    work_src = src
+    if dx != 0.0 or dy != 0.0 or scale_x != 1.0 or scale_y != 1.0 or rotate_deg != 0.0:
+        core.transform_grd(str(work_src), str(dst), float(dx), float(dy), float(scale_x), float(scale_y), float(rotate_deg))
+        work_src = dst
+    masked_count = 0
+    if mask_block is not None:
+        if len(mask_block) != 4:
+            raise ValueError("mask_block must be [m1, m2, n1, n2].")
+        masked_count = core.mask_grd_block(
+            str(work_src), str(dst), int(mask_block[0]), int(mask_block[1]), int(mask_block[2]), int(mask_block[3]), bool(mask_interior)
+        )
+    elif work_src == src:
+        core.transform_grd(str(src), str(dst), 0.0, 0.0, 1.0, 1.0, 0.0)
+    return {"dst_grd_path": str(dst), "masked_nodes": masked_count}
+
+
 # ==============================================================================
 # 3. BATHYMETRY / QUICKIN (4 tools)
 # ==============================================================================
@@ -416,31 +468,168 @@ def bathy_interpolate_xyz(
     flow_pad: bool = True,
     workspace: str | None = None,
 ) -> dict[str, Any]:
-    """Interpolate XYZ bathymetry samples onto a Delft3D .grd in parallel Rust (IDW or nearest)."""
+    """Interpolate XYZ samples onto a Delft3D .grd (method: idw, nearest, cell_average, or tin)."""
     grd_p, _ = ctx().registry.resolve_safe_path(grd_path, workspace=workspace, must_exist=True)
     xyz_p, _ = ctx().registry.resolve_safe_path(xyz_path, workspace=workspace, must_exist=True)
     dep_p, ws_root = ctx().registry.resolve_safe_path(out_dep_path, workspace=workspace)
     dep_p.parent.mkdir(parents=True, exist_ok=True)
     create_backup(dep_p, ws_root, label="bathy_interp")
     core = _get_core()
-    count = core.interpolate_xyz(
-        str(grd_p),
-        str(xyz_p),
-        str(dep_p),
-        method,
-        float(power),
-        float(search_radius) if search_radius is not None else None,
-        int(max_neighbors),
-    )
+    g = core.read_grd(str(grd_p))
+    gm, gn = int(g["m_max"]), int(g["n_max"])
+
+    if method.lower().strip() == "tin":
+        from scipy.interpolate import LinearNDInterpolator
+
+        pts = np.asarray(core.read_xyz_file(str(xyz_p)), dtype=float)
+        gx = np.asarray(g["x"], dtype=float)
+        gy = np.asarray(g["y"], dtype=float)
+        miss = float(g["missing_value"])
+        interp = LinearNDInterpolator(pts[:, :2], pts[:, 2], fill_value=-999.0)
+        z_out = interp(gx, gy)
+        grid_miss = (np.abs(gx - miss) < 1e-6) & (np.abs(gy - miss) < 1e-6)
+        z_out[grid_miss] = -999.0
+        core.write_dep_file(str(dep_p), z_out.tolist(), gm, gn)
+        count = int(z_out.size)
+    else:
+        count = core.interpolate_xyz(
+            str(grd_p),
+            str(xyz_p),
+            str(dep_p),
+            method,
+            float(power),
+            float(search_radius) if search_radius is not None else None,
+            int(max_neighbors),
+        )
+
     if flow_pad:
-        g = core.read_grd(str(grd_p))
-        gm, gn = int(g["m_max"]), int(g["n_max"])
         raw = np.asarray(core.read_dep_file(str(dep_p), gm, gn), dtype=float).reshape((gn, gm))
         padded = np.full((gn + 1, gm + 1), -999.0, dtype=float)
         padded[:gn, :gm] = raw
         core.write_dep_file(str(dep_p), padded.ravel().tolist(), gm + 1, gn + 1)
         count = padded.size
     return {"out_dep_path": str(dep_p), "node_count": count, "method": method, "flow_pad": flow_pad}
+
+
+@mcp.tool()
+def bathy_operations(
+    action: str,
+    dep_path: str,
+    grd_path: str,
+    second_dep_path: str | None = None,
+    out_path: str | None = None,
+    combine_op: str = "avg",
+    z_ref: float = 0.0,
+    tekal_path: str | None = None,
+    z_values: list[float] | None = None,
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """QUICKIN Operations parity: 'volumes_areas', 'combine' (two .dep files), or 'samples_from_tekal'."""
+    act = action.lower().strip()
+    core = _get_core()
+    grd_p, _ = ctx().registry.resolve_safe_path(grd_path, workspace=workspace, must_exist=True)
+    g = core.read_grd(str(grd_p))
+    gm, gn = int(g["m_max"]), int(g["n_max"])
+
+    if act == "samples_from_tekal":
+        if not tekal_path:
+            raise ValueError("tekal_path is required for samples_from_tekal.")
+        tek_p, _ = ctx().registry.resolve_safe_path(tekal_path, workspace=workspace, must_exist=True)
+        out_xyz, ws_root = ctx().registry.resolve_safe_path(out_path or "samples_from_poly.xyz", workspace=workspace)
+        create_backup(out_xyz, ws_root, label="tekal_to_xyz")
+        feats = core.read_tekal_file(str(tek_p))
+        lines: list[str] = []
+        z0 = float(z_values[0]) if z_values else 0.0
+        z1 = float(z_values[-1]) if z_values and len(z_values) > 1 else z0
+        for feat in feats:
+            pts = feat["points"]
+            n_pts = max(1, len(pts) - 1)
+            for idx, (px, py) in enumerate(pts):
+                z_interp = z0 + (z1 - z0) * (idx / n_pts)
+                lines.append(f"{px:.6f}  {py:.6f}  {z_interp:.4f}")
+        atomic_write_text(out_xyz, "\n".join(lines) + "\n", ws_root, backup_label="xyz_gen")
+        return {"out_xyz_path": str(out_xyz), "sample_count": len(lines)}
+
+    dep_p, ws_root = ctx().registry.resolve_safe_path(dep_path, workspace=workspace, must_exist=True)
+    try:
+        vals1 = np.asarray(core.read_dep_file(str(dep_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
+        is_padded = True
+    except Exception:
+        vals1 = np.asarray(core.read_dep_file(str(dep_p), gm, gn), dtype=float).reshape((gn, gm))
+        is_padded = False
+
+    if act == "volumes_areas":
+        gx = np.asarray(g["x"], dtype=float).reshape((gn, gm))
+        gy = np.asarray(g["y"], dtype=float).reshape((gn, gm))
+        miss = float(g["missing_value"])
+        total_area = 0.0
+        total_vol = 0.0
+        wet_cells = 0
+        for n in range(gn - 1):
+            for m in range(gm - 1):
+                pts_m = [(n, m), (n, m + 1), (n + 1, m + 1), (n + 1, m)]
+                if any(abs(gx[r, c] - miss) < 1e-6 and abs(gy[r, c] - miss) < 1e-6 for r, c in pts_m):
+                    continue
+                d_cell = np.mean([vals1[r, c] for r, c in pts_m])
+                if abs(d_cell - (-999.0)) < 1e-4:
+                    continue
+                x1, y1 = gx[n, m], gy[n, m]
+                x2, y2 = gx[n, m + 1], gy[n, m + 1]
+                x3, y3 = gx[n + 1, m + 1], gy[n + 1, m + 1]
+                x4, y4 = gx[n + 1, m], gy[n + 1, m]
+                area = 0.5 * abs((x1 * y2 - x2 * y1) + (x2 * y3 - x3 * y2) + (x3 * y4 - x4 * y3) + (x4 * y1 - x1 * y4))
+                water_col = d_cell + float(z_ref)
+                total_area += area
+                if water_col > 0:
+                    wet_cells += 1
+                    total_vol += area * water_col
+        return {
+            "wet_cells": wet_cells,
+            "total_area_m2": float(total_area),
+            "water_volume_m3": float(total_vol),
+            "z_ref": float(z_ref),
+        }
+
+    if act == "combine":
+        if not second_dep_path:
+            raise ValueError("second_dep_path is required for combine.")
+        dep2_p, _ = ctx().registry.resolve_safe_path(second_dep_path, workspace=workspace, must_exist=True)
+        try:
+            vals2 = np.asarray(core.read_dep_file(str(dep2_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
+        except Exception:
+            vals2 = np.asarray(core.read_dep_file(str(dep2_p), gm, gn), dtype=float).reshape((gn, gm))
+        m1 = np.abs(vals1 - (-999.0)) > 1e-4
+        m2 = np.abs(vals2 - (-999.0)) > 1e-4
+        both = m1 & m2
+        out = vals1.copy()
+        cop = combine_op.lower().strip()
+        if cop == "add":
+            out[both] = vals1[both] + vals2[both]
+        elif cop == "sub":
+            out[both] = vals1[both] - vals2[both]
+        elif cop == "avg":
+            out[both] = 0.5 * (vals1[both] + vals2[both])
+        elif cop == "min":
+            out[both] = np.minimum(vals1[both], vals2[both])
+        elif cop == "max":
+            out[both] = np.maximum(vals1[both], vals2[both])
+        elif cop == "replace_missing":
+            fill_mask = (~m1) & m2
+            out[fill_mask] = vals2[fill_mask]
+        else:
+            raise ValueError("combine_op must be add, sub, avg, min, max, or replace_missing.")
+
+        dst_p, _ = ctx().registry.resolve_safe_path(out_path or str(dep_p), workspace=workspace)
+        create_backup(dst_p, ws_root, label="bathy_combine")
+        if is_padded:
+            padded = np.full((gn + 1, gm + 1), -999.0, dtype=float)
+            padded[:gn, :gm] = out
+            core.write_dep_file(str(dst_p), padded.ravel().tolist(), gm + 1, gn + 1)
+        else:
+            core.write_dep_file(str(dst_p), out.ravel().tolist(), gm, gn)
+        return {"out_dep_path": str(dst_p), "combine_op": cop}
+
+    raise ValueError("action must be 'volumes_areas', 'combine', or 'samples_from_tekal'.")
 
 
 @mcp.tool()
@@ -546,14 +735,22 @@ def flow_set_boundaries(
     boundaries: list[dict[str, Any]],
     bct_path: str | None = None,
     bct_tables: list[dict[str, Any]] | None = None,
+    bcc_path: str | None = None,
+    bcc_tables: list[dict[str, Any]] | None = None,
+    bch_path: str | None = None,
+    bch_params: dict[str, Any] | None = None,
+    src_path: str | None = None,
+    dis_path: str | None = None,
+    discharges: list[dict[str, Any]] | None = None,
     reference_time: int = 20260101,
     mdf_path: str | None = None,
     workspace: str | None = None,
 ) -> dict[str, Any]:
-    """Write open boundary definitions (.bnd) and optional time-series forcings (.bct), linking to .mdf."""
+    """Write .bnd, .bct, .bcc, .bch, and .src/.dis discharge files, optionally linking them to .mdf."""
     bnd_p, ws_root = ctx().registry.resolve_safe_path(bnd_path, workspace=workspace)
     atomic_write_text(bnd_p, format_bnd_file(boundaries), ws_root, backup_label="bnd_write")
     out: dict[str, Any] = {"bnd_path": str(bnd_p), "boundary_count": len(boundaries)}
+    mdf_upd: dict[str, Any] = {"Filbnd": bnd_p.name}
 
     if bct_path and bct_tables is not None:
         bct_p, _ = ctx().registry.resolve_safe_path(bct_path, workspace=workspace)
@@ -564,14 +761,46 @@ def flow_set_boundaries(
             backup_label="bct_write",
         )
         out["bct_path"] = str(bct_p)
+        mdf_upd["FilbcT"] = bct_p.name
+
+    if bcc_path and bcc_tables is not None:
+        bcc_p, _ = ctx().registry.resolve_safe_path(bcc_path, workspace=workspace)
+        atomic_write_text(
+            bcc_p,
+            format_bcc_file(bcc_tables, reference_time=reference_time),
+            ws_root,
+            backup_label="bcc_write",
+        )
+        out["bcc_path"] = str(bcc_p)
+        mdf_upd["FilbcC"] = bcc_p.name
+
+    if bch_path and bch_params is not None:
+        bch_p, _ = ctx().registry.resolve_safe_path(bch_path, workspace=workspace)
+        bch_txt = format_bch_file(
+            frequencies_deg_per_hr=bch_params["frequencies_deg_per_hr"],
+            amplitudes_end_a=bch_params["amplitudes_end_a"],
+            amplitudes_end_b=bch_params["amplitudes_end_b"],
+            phases_end_a=bch_params["phases_end_a"],
+            phases_end_b=bch_params["phases_end_b"],
+            z0_per_boundary=bch_params.get("z0_per_boundary"),
+        )
+        atomic_write_text(bch_p, bch_txt, ws_root, backup_label="bch_write")
+        out["bch_path"] = str(bch_p)
+        mdf_upd["FilbcH"] = bch_p.name
+
+    if src_path and dis_path and discharges is not None:
+        src_p, _ = ctx().registry.resolve_safe_path(src_path, workspace=workspace)
+        dis_p, _ = ctx().registry.resolve_safe_path(dis_path, workspace=workspace)
+        src_txt, dis_txt = format_src_dis_files(discharges, reference_time=reference_time)
+        atomic_write_text(src_p, src_txt, ws_root, backup_label="src_write")
+        atomic_write_text(dis_p, dis_txt, ws_root, backup_label="dis_write")
+        out["src_path"] = str(src_p)
+        out["dis_path"] = str(dis_p)
 
     if mdf_path:
         mdf_p, _ = ctx().registry.resolve_safe_path(mdf_path, workspace=workspace, must_exist=True)
         doc = MdfDocument.from_file(mdf_p)
-        upd: dict[str, Any] = {"Filbnd": bnd_p.name}
-        if bct_path:
-            upd["FilbcT"] = Path(bct_path).name
-        doc.set_many(upd)
+        doc.set_many(mdf_upd)
         atomic_write_text(mdf_p, doc.to_text(), ws_root, backup_label="mdf_link_bnd")
         out["mdf_linked"] = str(mdf_p)
     return out
@@ -732,9 +961,19 @@ def tide_wes_generate(
     params: dict[str, Any],
     workspace: str | None = None,
 ) -> dict[str, Any]:
-    """Generate configuration files for Delft3D-WES ('wes') or Delft3D-TIDE ('tide')."""
-    p, ws = ctx().registry.resolve_safe_path(out_path, workspace=workspace)
+    """Generate WES/TIDE/RTC configs or run least-squares tidal harmonic fit ('wes', 'tide', 'rtc', 'harmonic_fit')."""
     kind = tool_kind.lower().strip()
+    if kind == "harmonic_fit":
+        return harmonic_fit_and_predict(
+            times_hours=[float(v) for v in params["times_hours"]],
+            values=[float(v) for v in params["values"]],
+            constituents=params.get("constituents"),
+            predict_times_hours=[float(v) for v in params["predict_times_hours"]]
+            if params.get("predict_times_hours") is not None
+            else None,
+        )
+
+    p, ws = ctx().registry.resolve_safe_path(out_path, workspace=workspace)
     if kind == "wes":
         content = build_wes_input(params)
     elif kind == "tide":
@@ -743,8 +982,10 @@ def tide_wes_generate(
             constituents=list(params.get("constituents", ["M2", "S2", "K1", "O1"])),
             output_file=str(params.get("output_file", "tide_out.txt")),
         )
+    elif kind == "rtc":
+        content = build_rtc_config(params)
     else:
-        raise ValueError("tool_kind must be 'wes' or 'tide'.")
+        raise ValueError("tool_kind must be 'wes', 'tide', 'rtc', or 'harmonic_fit'.")
     atomic_write_text(p, content, ws, backup_label=f"{kind}_gen")
     return {"out_path": str(p), "tool_kind": kind}
 
@@ -921,12 +1162,31 @@ def post_convert_netcdf_gis(
     args: list[str],
     workspace: str | None = None,
 ) -> dict[str, Any]:
-    """Convert Delft3D outputs using sim2ugrid, maptonetcdf (WAQ), delwaq2raster, or delft3d2shape."""
+    """Convert NEFIS/Delft3D outputs (nefis_to_netcdf, sim2ugrid, maptonetcdf, delwaq2raster, delft3d2shape)."""
     conv = converter.lower().strip()
+    if conv == "nefis_to_netcdf":
+        if len(args) < 2:
+            raise ValueError("nefis_to_netcdf requires args=[dat_path, out_nc_path, ...optional_groups]")
+        dat_p, _ = ctx().registry.resolve_safe_path(args[0], workspace=workspace, must_exist=True)
+        nc_p, ws_root = ctx().registry.resolve_safe_path(args[1], workspace=workspace)
+        create_backup(nc_p, ws_root, label="nefis_nc")
+        grp_filter = args[2:] if len(args) > 2 else None
+        return export_nefis_to_netcdf(dat_p, nc_p, _get_core(), groups=grp_filter)
     if conv not in {"sim2ugrid", "maptonetcdf", "delwaq2raster", "delft3d2shape"}:
-        raise ValueError("converter must be one of: sim2ugrid, maptonetcdf, delwaq2raster, delft3d2shape")
+        raise ValueError(
+            "converter must be one of: nefis_to_netcdf, sim2ugrid, maptonetcdf, delwaq2raster, delft3d2shape"
+        )
     wdir, _ = ctx().registry.resolve_safe_path(work_dir_path, workspace=workspace, must_exist=True)
     return ctx().jobs.run_utility_sync(conv, wdir, args)
+
+
+@mcp.tool()
+def post_validate_skill(
+    observed: list[float],
+    simulated: list[float],
+) -> dict[str, float]:
+    """Compute calibration skill metrics (RMSE, MAE, Bias, Pearson R, NSE, Willmott d)."""
+    return compute_skill_metrics(observed, simulated)
 
 
 @mcp.tool()
@@ -1019,6 +1279,7 @@ def gui_ui_action(
             points=points,
             normalized_coords=normalized_coords,
             double_click_last=double_click_last,
+            keys=keys,
         )
     if b == "tcltk":
         return send_tcltk_close_or_keys(int(hwnd), action=action, keys=keys)

@@ -69,3 +69,30 @@ def test_boundaries_and_wave_waq_part_formats(tmp_path: Path) -> None:
     assert "Tracer" in build_part_inp({"num_particles": 500})
     assert "Holland" in build_wes_input({"method": "Holland"})
     assert "M2 S2" in build_tide_analysis_input("wl.txt", ["M2", "S2"], "out.txt")
+
+
+def test_bcc_bch_dis_harmonic_and_skill() -> None:
+    import math
+
+    from delft3d_mcp.domain.boundaries import format_bcc_file, format_bch_file, format_src_dis_files
+    from delft3d_mcp.domain.tide_wes import build_rtc_config, harmonic_fit_and_predict
+    from delft3d_mcp.post.extract import compute_skill_metrics
+
+    assert "Salinity" in format_bcc_file(
+        [{"location": "West", "param_a": "Salinity end A", "records": [[0.0, 32.0, 32.0]]}]
+    )
+    bch = format_bch_file([28.9841042], [[1.2]], [[1.2]], [[45.0]], [[45.0]])
+    assert "28.984104" in bch
+    src_t, dis_t = format_src_dis_files([{"name": "Outfall1", "m": 3, "n": 4, "records": [[0.0, 5.0, 5.0]]}])
+    assert "Outfall1" in src_t and "5.000000E+00" in dis_t
+
+    times = [float(h) for h in range(48)]
+    vals = [1.5 * math.cos(math.radians(28.9841042 * h - 30.0)) + 0.5 for h in times]
+    fit = harmonic_fit_and_predict(times, vals, constituents=["M2"], predict_times_hours=[48.0, 49.0])
+    assert abs(fit["z0"] - 0.5) < 1e-3
+    assert abs(fit["constituents"][0]["amplitude"] - 1.5) < 1e-3
+    assert len(fit["predicted"]) == 2
+    assert "Feedback" in build_rtc_config({"mode": "Feedback"})
+
+    skill = compute_skill_metrics([1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
+    assert skill["rmse"] == 0.0 and skill["nse"] == 1.0
