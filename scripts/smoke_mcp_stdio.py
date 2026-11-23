@@ -1,4 +1,4 @@
-"""Smoke test verifying MCP stdio JSON-RPC protocol hygiene and 42-tool registration."""
+"""Smoke test verifying MCP stdio JSON-RPC protocol hygiene and 49-tool registration."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def main() -> int:
             indent=2,
         )
     )
-    assert len(tools) == 48, f"Expected 48 tools, got {len(tools)}"
+    assert len(tools) == 49, f"Expected 49 tools, got {len(tools)}"
     assert len(resources) >= 4
     assert len(prompts) == 3
     return 0

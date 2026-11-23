@@ -62,6 +62,10 @@ def launch_gui_module(
     elif mod == "part_gui":
         cmd = [str(paths.part_gui_exe)]
     elif mod == "quickplot":
+        if target_file and target_file.suffix.lower() in {".qplog", ".m"}:
+            raise ValueError(
+                "d3d_qp.exe ignores .qplog/.m CLI arguments; use post_run_qplog to execute a .qplog macro."
+            )
         cmd = [str(paths.d3d_qp_exe)]
         if target_file:
             cmd.append(str(target_file))
@@ -90,8 +94,21 @@ def launch_gui_module(
     }
 
 
+def bring_window_to_front(hwnd: int) -> None:
+    """Restore an iconified Win32 window and request foreground activation."""
+    if sys.platform != "win32":
+        return
+    import win32con
+    import win32gui
+
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    with contextlib.suppress(Exception):
+        win32gui.SetForegroundWindow(hwnd)
+
+
 def list_delft3d_windows() -> list[dict[str, Any]]:
-    """Enumerate visible top-level Delft3D-related windows on Windows."""
+    """Enumerate visible top-level Delft3D windows, dialogs, and MATLAB figures on Windows."""
     if sys.platform != "win32":
         return []
     import win32gui
@@ -100,22 +117,27 @@ def list_delft3d_windows() -> list[dict[str, Any]]:
     target_exes = {
         "d3d_menu.exe",
         "mfe_app.exe",
+        "rgfgrid.exe",
+        "quickin.exe",
+        "dido.exe",
         "flow_gui.exe",
         "wave_gui.exe",
         "waq_gui.exe",
         "part_gui.exe",
         "d3d_qp.exe",
+        "d3d_qp.exec",
         "vsi.exe",
         "tide.exe",
     }
+    fg_hwnd = win32gui.GetForegroundWindow()
     found: list[dict[str, Any]] = []
 
-    def _cb(hwnd: int, _: Any) -> None:
+    def _cb(hwnd: int, _: Any) -> bool:
         if not win32gui.IsWindowVisible(hwnd):
-            return
+            return True
         title = win32gui.GetWindowText(hwnd)
         if not title:
-            return
+            return True
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         exe_name = ""
         with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
@@ -124,12 +146,17 @@ def list_delft3d_windows() -> list[dict[str, Any]]:
             kw in title.lower() for kw in ("delft3d", "rgfgrid", "quickin", "dido", "quickplot")
         ):
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+            class_name = ""
+            with contextlib.suppress(Exception):
+                class_name = win32gui.GetClassName(hwnd)
             found.append(
                 {
                     "hwnd": hwnd,
                     "pid": pid,
                     "exe": exe_name,
                     "title": title,
+                    "class_name": class_name,
+                    "is_foreground": hwnd == fg_hwnd,
                     "rect": {
                         "left": left,
                         "top": top,
@@ -138,6 +165,7 @@ def list_delft3d_windows() -> list[dict[str, Any]]:
                     },
                 }
             )
+        return True
 
     win32gui.EnumWindows(_cb, None)
     return found
@@ -153,7 +181,6 @@ def capture_window_screenshot(
         raise RuntimeError("Window capture is only supported on Windows.")
     import ctypes
 
-    import win32con
     import win32gui
     import win32ui
     from PIL import Image
@@ -172,10 +199,7 @@ def capture_window_screenshot(
         raise RuntimeError("No matching visible Delft3D window found to capture.")
 
     thwnd = int(target["hwnd"])
-    if win32gui.IsIconic(thwnd):
-        win32gui.ShowWindow(thwnd, win32con.SW_RESTORE)
-    with contextlib.suppress(Exception):
-        win32gui.SetForegroundWindow(thwnd)
+    bring_window_to_front(thwnd)
     time.sleep(0.25)
 
     left, top, right, bottom = win32gui.GetWindowRect(thwnd)

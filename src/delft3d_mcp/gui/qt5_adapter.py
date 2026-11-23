@@ -2,9 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from typing import Any
+
+from delft3d_mcp.gui.win32_bridge import bring_window_to_front
+
+SUPPORTED_QT5_ACTIONS = (
+    "menu_select",
+    "click_button",
+    "click_screen_point",
+    "set_text",
+    "send_keys",
+    "read_status_bar",
+    "canvas_click_points",
+    "canvas_drag",
+    "close",
+)
 
 
 def inspect_qt5_controls(hwnd: int, max_depth: int = 3) -> list[dict[str, Any]]:
@@ -53,13 +68,50 @@ def _resolve_canvas_bounds(hwnd: int) -> tuple[int, int, int, int]:
     return c_left, c_top, max(10, c_right - c_left), max(10, c_bottom - c_top)
 
 
-def _find_named_control(win: Any, target_name: str) -> Any:
-    """Locate Qt5 UIA control across Button, CheckBox (toolbar actions), RadioButton, and MenuItem."""
-    for ctype in ("Button", "CheckBox", "RadioButton", "MenuItem"):
-        ctrl = win.child_window(title=target_name, control_type=ctype)
-        if ctrl.exists(timeout=0.3):
+def _iter_pid_windows(hwnd: int, app: Any) -> list[Any]:
+    """Return the primary UIA window followed by any visible owned/dialog windows of the same PID."""
+    import win32gui
+    import win32process
+
+    wins = [app.window(handle=hwnd)]
+    _, target_pid = win32process.GetWindowThreadProcessId(hwnd)
+    extra_hwnds: list[int] = []
+
+    def _cb(candidate: int, _: Any) -> bool:
+        if candidate != hwnd and win32gui.IsWindowVisible(candidate):
+            _, cpid = win32process.GetWindowThreadProcessId(candidate)
+            if cpid == target_pid and win32gui.GetWindowText(candidate):
+                extra_hwnds.append(candidate)
+        return True
+
+    win32gui.EnumWindows(_cb, None)
+    for eh in extra_hwnds:
+        with contextlib.suppress(Exception):
+            wins.append(app.window(handle=eh))
+    return wins
+
+
+def _find_named_control(win: Any, target_name: str, extra_wins: list[Any] | None = None) -> Any:
+    """Locate UIA control across Button, SplitButton, CheckBox, RadioButton, and MenuItem."""
+    search_wins = extra_wins if extra_wins else [win]
+    for w in search_wins:
+        for ctype in ("Button", "SplitButton", "CheckBox", "RadioButton", "MenuItem"):
+            ctrl = w.child_window(title=target_name, control_type=ctype)
+            if ctrl.exists(timeout=0.25):
+                return ctrl
+        ctrl = w.child_window(title=target_name)
+        if ctrl.exists(timeout=0.2):
             return ctrl
     return win.child_window(title=target_name)
+
+
+def _find_edit_control(wins: list[Any], target_name: str) -> Any:
+    """Locate an Edit control inside the main window or owned file/message dialogs."""
+    for w in wins:
+        ctrl = w.child_window(title=target_name, control_type="Edit")
+        if ctrl.exists(timeout=0.25):
+            return ctrl
+    return wins[0].child_window(title=target_name, control_type="Edit")
 
 
 def _click_coords(hwnd: int, px: int, py: int, button: str = "left", double: bool = False) -> str:
@@ -105,13 +157,18 @@ def execute_qt5_action(
     """Execute deterministic UIA, toolbar, dialog, statusbar, or calibrated canvas actions on Qt5."""
     if sys.platform != "win32":
         raise RuntimeError("Qt5 UIA actions require Windows.")
+    act = action.lower().strip()
+    if act not in SUPPORTED_QT5_ACTIONS and act != "keys":
+        raise ValueError(
+            f"Unsupported Qt5 UIA action '{action}'. Supported: {', '.join(SUPPORTED_QT5_ACTIONS)}"
+        )
     from pywinauto import Application, mouse
 
+    bring_window_to_front(hwnd)
     app = Application(backend="uia").connect(handle=hwnd)
     win = app.window(handle=hwnd)
-    win.set_focus()
-
-    act = action.lower().strip()
+    with contextlib.suppress(Exception):
+        win.set_focus()
     if act == "menu_select":
         if not menu_path:
             raise ValueError("menu_path is required for menu_select (e.g. 'Operations->Create Rectangular Grid...').")
@@ -121,7 +178,7 @@ def execute_qt5_action(
     if act == "click_button":
         if not target_name:
             raise ValueError("target_name is required for click_button.")
-        ctrl = _find_named_control(win, target_name)
+        ctrl = _find_named_control(win, target_name, extra_wins=_iter_pid_windows(hwnd, app))
         method_used = "uia"
         try:
             wrapper = ctrl.wrapper_object()
@@ -149,15 +206,15 @@ def execute_qt5_action(
     if act == "set_text":
         if not target_name or text_value is None:
             raise ValueError("target_name and text_value are required for set_text.")
-        edit = win.child_window(title=target_name, control_type="Edit")
+        edit = _find_edit_control(_iter_pid_windows(hwnd, app), target_name)
         edit.set_edit_text(text_value)
         return {"status": "ok", "action": act, "target": target_name}
 
-    if act == "send_keys":
+    if act in {"send_keys", "keys"}:
         if not keys:
             raise ValueError("keys is required for send_keys.")
         win.type_keys(keys, with_spaces=True)
-        return {"status": "ok", "action": act, "keys": keys}
+        return {"status": "ok", "action": "send_keys", "keys": keys}
 
     if act == "read_status_bar":
         sb = win.child_window(control_type="StatusBar")
@@ -200,7 +257,9 @@ def execute_qt5_action(
         win.close()
         return {"status": "ok", "action": "close", "hwnd": hwnd}
 
-    raise ValueError(f"Unsupported Qt5 UIA action: {action}")
+    raise ValueError(
+        f"Unsupported Qt5 UIA action '{action}'. Supported: {', '.join(SUPPORTED_QT5_ACTIONS)}"
+    )
 
 
 def send_tcltk_close_or_keys(hwnd: int, action: str, keys: str | None = None) -> dict[str, Any]:

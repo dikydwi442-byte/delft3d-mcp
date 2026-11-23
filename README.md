@@ -18,7 +18,7 @@
 ## What it covers
 
 - Memory-mapped 32-bit and 64-bit NEFIS reader (`trim-*`, `trih-*`, `wavm-*`), Transfinite Interpolation (TFI) curvilinear grid builder, Winslow elliptic orthogonalizer, parallel bathymetry interpolation (`idw`, `nearest`, `cell_average`), and a non-blocking `tri-diag` log scanner written in Rust (`delft3d_core`).
-- 48 tools covering RGFGRID, QUICKIN, DIDO, Delft3D-FLOW (2D/3D and morphology), Delft3D-WAVE (SWAN), Delft3D-WAQ, Delft3D-PART, TIDE, WES, RTC, and QUICKPLOT.
+- 49 tools covering RGFGRID, QUICKIN, DIDO, Delft3D-FLOW (2D/3D and morphology), Delft3D-WAVE (SWAN), Delft3D-WAQ, Delft3D-PART, TIDE, WES, RTC, and QUICKPLOT.
 - Pre-run validation that estimates Courant (CFL) numbers, checks `(M, N)` grid and bathymetry dimensions, and verifies referenced attribute files before a run starts.
 - Direct process execution (`shell=False`) for `d_hydro.exe`, `mpiexec.exe -localonly`, coupled `wave.exe <mdw> 1`, `delwaq.exe`, and `delpar.exe` with output routed to job logs so MCP `stdio` JSON-RPC framing stays intact.
 - Sandboxed file access limited to registered project folders (`WorkspaceRegistry`), with atomic writes and automatic backups saved under `.d3d_mcp_backups/`.
@@ -39,7 +39,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Client["MCP Client (Desktop IDE / Assistant)"] <-->|"JSON-RPC 2.0 (stdio)"| Server["Python 3.12 MCP Host (48 Tools, 4 Resources, 3 Prompts)"]
+    Client["MCP Client (Desktop IDE / Assistant)"] <-->|"JSON-RPC 2.0 (stdio)"| Server["Python 3.12 MCP Host (49 Tools, 5 Resources, 3 Prompts)"]
 
     subgraph Security["Safety and logging"]
         Server --> Guard["Workspace Sandbox Guard (blocks traversal and system dirs)"]
@@ -74,7 +74,7 @@ flowchart TD
 
 | Delft3D version or mode | Directory layout | Status | What works |
 | :--- | :--- | :--- | :--- |
-| Delft3D 4.05.xx to 4.07.02+ (modern installer / OSS) | `kernels\x64\bin` + `guis\x64\...` | Full support | All 48 tools: FLOW, MPI, coupled WAVE (`wave.exe <mdw> 1`), WAQ, PART, TIDE, WES, RTC, NEFIS, NetCDF4, and the GUI bridge (`mfe_app.exe`, `d3d_menu.exe`, `d3d_qp.exe`). |
+| Delft3D 4.05.xx to 4.07.02+ (modern installer / OSS) | `kernels\x64\bin` + `guis\x64\...` | Full support | All 49 tools: FLOW, MPI, coupled WAVE (`wave.exe <mdw> 1`), WAQ, PART, TIDE, WES, RTC, NEFIS, NetCDF4, QUICKPLOT batch export (`post_run_qplog`), and the GUI bridge (`mfe_app.exe`, `d3d_menu.exe`, `d3d_qp.exe` / `d3d_qp.exec`). |
 | Delft3D 4.01.xx to 4.04.xx (classic `x64` / `win32`) | `x64\<module>\bin` or `w32\<module>\bin` | Compatible (auto-detected) | Falls back to classic binary paths (`d_hydro.exe` / `trisim.exe`, `delwaq2.exe`, `rgfgrid.exe`, `quickin.exe`) along with all domain and NEFIS tools. |
 | Headless / file-only workstation (no Delft3D installed) | `headless_file_only` | Pre- and post-processing | Grid building (`TFI`, elliptic smoothing, `TEKAL`), bathymetry interpolation (`idw`, `tin`, `cell_average`), MDF/MDW/boundary editing, NEFIS `.dat`/`.def` reading, NetCDF4/GeoJSON export, harmonic analysis, and skill metrics. |
 
@@ -110,7 +110,7 @@ uv sync --python 3.12 --all-groups
 
 `DELFT3D_ROOT` is optional. When omitted, the server scans local Deltares install folders automatically.
 
-## Tool reference (48 tools)
+## Tool reference (49 tools)
 
 ### 1. Project and workspace safety (5 tools)
 | Tool | Key parameters | What it does |
@@ -174,7 +174,7 @@ uv sync --python 3.12 --all-groups
 | `sim_stop` | `job_id` | Stops a running job and its child MPI/WAVE processes after verifying process names. |
 | `sim_run_utility` | `utility` (`agrhyd`, `ddcouple`, `mormerge`, `nesthd1`, `nesthd2`, `wes`, `tide_analysis`, `tide_predict`, `maptonetcdf`, `sim2ugrid`, `delft3d2shape`, `delwaq2raster`, `vs`, `plct`, `nestwq1`, `nestwq2`, `waqmerge`, `triana`, `kubint`, `lint`, `datsel`), `work_dir_path`, `args` | Runs short Delft3D CLI utilities synchronously. |
 
-### 7. NEFIS post-processing, NetCDF, and skill checks (6 tools)
+### 7. NEFIS post-processing, NetCDF, and skill checks (7 tools)
 | Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
 | `post_list_nefis_vars` | `dat_path`, `def_path` | Lists groups, dimensions, and elements inside a NEFIS `.dat`/`.def` file pair. |
@@ -182,13 +182,14 @@ uv sync --python 3.12 --all-groups
 | `post_extract_map_slice` | `dat_path`, `group_name`, `element_name`, `time_index` | Extracts spatial slices (`S1`, `U1`, `V1`, `DP0`, `HSIGN`) at a chosen time step from `trim-*` or `wavm-*`. |
 | `post_convert_netcdf_gis` | `converter` (`nefis_to_netcdf`, `sim2ugrid`, `maptonetcdf`, `delwaq2raster`, `delft3d2shape`), `work_dir_path`, `args` | Exports NEFIS data directly to NetCDF4 (`.nc`) or runs Deltares GIS/UGRID converters. |
 | `post_validate_skill` | `observed`, `simulated` | Calculates RMSE, MAE, bias, Pearson `r`, Nash-Sutcliffe efficiency (NSE), and Willmott `d`. |
-| `post_plot_snapshot` | `plot_kind` (`grid_bathy`/`timeseries`), `out_png_path`, `grd_path`, `dep_path`, `times`, `values` | Saves 150-DPI PNG plots of grids, bathymetry, or time series headlessly. |
+| `post_plot_snapshot` | `plot_kind` (`grid_bathy`/`timeseries`), `out_png_path`, `grd_path`, `dep_path`, `times`, `values` | Saves 150-DPI PNG plots of grids, FLOW-padded or raw bathymetry, or time series headlessly. |
+| `post_run_qplog` | `qplog_path`, `expected_outputs`, `timeout_sec`, `work_dir_path` | Runs a consolidated Delft3D-QUICKPLOT `.qplog` batch macro in one call and verifies exported outputs. |
 
 ### 8. Windows desktop GUI bridge (4 tools)
 | Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
 | `gui_launch_module` | `module` (`menu`, `rgfgrid`, `quickin`, `dido`, `flow_gui`, `wave_gui`, `waq_gui`, `part_gui`, `quickplot`, `vsi`), `work_dir_path`, `target_file` | Launches a Delft3D GUI program with the required Qt and plugin environment variables. |
-| `gui_list_windows` | `inspect_qt5_hwnd` | Lists open Delft3D windows and optionally dumps the Qt5 UI Automation tree. |
+| `gui_list_windows` | `inspect_qt5_hwnd` | Lists open Delft3D windows, `d3d_qp.exec` dialogs/figures, and foreground state; optionally dumps the Qt5 UI Automation tree. |
 | `gui_ui_action` | `hwnd`, `backend` (`qt5`/`tcltk`), `action` (`menu_select`, `click_button`, `click_screen_point`, `set_text`, `send_keys`, `read_status_bar`, `canvas_click_points`, `canvas_drag`, `close`) | Runs menu items, toggles toolbar buttons, reads the cursor status bar, or clicks/drags on the OpenGL canvas. |
 | `gui_capture_screenshot` | `out_png_path`, `hwnd`, `title_contains` | Captures a Delft3D window to PNG via Win32 `PrintWindow` with `mss` fallback. |
 

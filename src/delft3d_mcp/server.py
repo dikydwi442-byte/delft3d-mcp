@@ -1,4 +1,4 @@
-"""FastMCP server exposing 42 modular tools, resources, and prompts for Delft3D 4.07.02."""
+"""FastMCP server exposing 49 modular tools, resources, and prompts for Delft3D."""
 
 from __future__ import annotations
 
@@ -60,13 +60,28 @@ from delft3d_mcp.post.extract import (
     extract_nefis_slice,
     list_nefis_groups,
 )
-from delft3d_mcp.post.quickplot import render_grid_and_bathy_png, render_timeseries_png
+from delft3d_mcp.post.quickplot import (
+    parse_qplog_outputs,
+    render_grid_and_bathy_png,
+    render_timeseries_png,
+    run_quickplot_batch,
+)
+from delft3d_mcp.post.quickplot import (
+    read_dep_matrix as _read_dep_matrix,
+)
 from delft3d_mcp.runner.job_manager import JobManager
 from delft3d_mcp.runner.validator import validate_flow_case, validate_wave_case
 
 logger = logging.getLogger("delft3d_mcp.server")
 
-mcp = FastMCP("delft3d-mcp")
+mcp = FastMCP(
+    "delft3d-mcp",
+    instructions=(
+        "For native Delft3D-QUICKPLOT exports, prefer one consolidated .qplog batch via post_run_qplog "
+        "(ending each figure with `title '...'`, `printfigure`, `closefigure`, and ending the macro with `close`) "
+        "rather than iterative GUI toolbar clicks. Read delft3d://docs/qplog-keywords for verified syntax."
+    ),
+)
 
 
 def _get_core() -> Any:
@@ -98,16 +113,6 @@ def _opt_safe_path(raw: str | None, workspace: str | None = None, must_exist: bo
     if not raw:
         return None
     return ctx().registry.resolve_safe_path(raw, workspace=workspace, must_exist=must_exist)[0]
-
-
-def _read_dep_matrix(core: Any, dep_p: Path, gm: int, gn: int) -> tuple[np.ndarray[Any, Any], bool]:
-    """Read .dep file supporting either MNKmax-padded (gm+1, gn+1) or raw grid (gm, gn) shape."""
-    try:
-        arr = np.asarray(core.read_dep_file(str(dep_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
-        return arr, True
-    except Exception:
-        arr = np.asarray(core.read_dep_file(str(dep_p), gm, gn), dtype=float).reshape((gn, gm))
-        return arr, False
 
 
 # ==============================================================================
@@ -1224,6 +1229,38 @@ def post_plot_snapshot(
     raise ValueError("plot_kind must be 'grid_bathy' or 'timeseries'.")
 
 
+@mcp.tool()
+def post_run_qplog(
+    qplog_path: str,
+    expected_outputs: list[str] | None = None,
+    timeout_sec: float = 90.0,
+    work_dir_path: str = ".",
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """Execute a consolidated Delft3D-QUICKPLOT .qplog batch macro in one deterministic call."""
+    qplog_p, ws_root = ctx().registry.resolve_safe_path(qplog_path, workspace=workspace, must_exist=True)
+    wdir, _ = ctx().registry.resolve_safe_path(work_dir_path, workspace=workspace, must_exist=True)
+
+    # Validate every printfigure destination inside the .qplog against the workspace sandbox.
+    parsed_outputs = parse_qplog_outputs(qplog_p.read_text(encoding="utf-8", errors="replace"))
+    safe_parsed = [ctx().registry.resolve_safe_path(str(p), workspace=workspace)[0] for p in parsed_outputs]
+    safe_expected = (
+        [ctx().registry.resolve_safe_path(p, workspace=workspace)[0] for p in expected_outputs]
+        if expected_outputs is not None
+        else safe_parsed
+    )
+    for target_p in safe_expected:
+        create_backup(target_p, ws_root, label="qplog")
+
+    return run_quickplot_batch(
+        ctx().paths,
+        qplog_p,
+        wdir,
+        expected_outputs=safe_expected,
+        timeout_sec=float(timeout_sec),
+    )
+
+
 # ==============================================================================
 # 8. SMART WINDOWS GUI BRIDGE (4 tools)
 # ==============================================================================
@@ -1269,7 +1306,7 @@ def gui_ui_action(
     normalized_coords: bool = True,
     double_click_last: bool = False,
 ) -> dict[str, Any]:
-    """Execute UIA/canvas actions on Qt5 ('qt5': menu_select, click_button, set_text, canvas_click_points, canvas_drag, close) or Tcl/Tk ('tcltk')."""
+    """Execute UIA/canvas actions on Qt5 ('qt5': menu_select, click_button, click_screen_point, set_text, send_keys, read_status_bar, canvas_click_points, canvas_drag, close) or Tcl/Tk ('tcltk')."""
     b = backend.lower().strip()
     if b == "qt5":
         return execute_qt5_action(
@@ -1346,6 +1383,51 @@ def resource_mdf_keywords() -> str:
             "physics": ["Sub1", "Sub2", "Roumet", "Ccofu", "Ccofv", "Vicouv", "Dicouv", "Zeta0"],
             "morphology": ["Filmor", "Filsed"],
             "output": ["Flmap", "Flhis", "Flpp", "Flrst", "Filsta", "Filcrs", "Filtd", "Fildry"],
+        },
+        indent=2,
+    )
+
+
+@mcp.resource("delft3d://docs/qplog-keywords")
+def resource_qplog_keywords() -> str:
+    return json.dumps(
+        {
+            "file_and_slice": [
+                "openfile '<path>'",
+                "selectfield '<name>'",
+                "station '<obs>'",
+                "allt 0|1",
+                "editt <step|'s:e'>",
+                "allm 0|1",
+                "alln 0|1",
+            ],
+            "colorbar_and_limits": [
+                "colbarhorz 0|1",
+                "climmode 'manual'|'automatic'",
+                "climmin <val>",
+                "climmax <val>",
+            ],
+            "vectors": [
+                "component 'vector'|'magnitude'",
+                "vecscalem 'automatic'|'manual'|'automatic normalised'|'manual normalised'",
+                "1vecunit <unit_length>",
+                "thinfld 'none'|'uniform'|'distance'",
+                "thindist <spacing>",
+                "colour [r g b]",
+            ],
+            "plot_and_export": [
+                "quickview",
+                "addtoplot",
+                "title '<short single-line title>' (place AFTER addtoplot)",
+                "printfigure '<abs_path>.png' 'PNG file' 2 300 1",
+                "closefigure",
+                "close",
+            ],
+            "tips": [
+                "Prefer *_LatLon.dat over UTM trim files for geographic degree axes.",
+                "Use colbarhorz 0 (vertical right colorbar) when horizontal xlabel text would collide with the colorbar.",
+                "Execute consolidated batches via post_run_qplog instead of manual toolbar clicking.",
+            ],
         },
         indent=2,
     )

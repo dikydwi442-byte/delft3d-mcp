@@ -2,6 +2,18 @@
 
 All notable changes to `delft3d-mcp` are recorded in this file.
 
+## [Unreleased]
+
+### Added
+- Added `post_run_qplog` (49th tool) for one-shot deterministic execution of consolidated Delft3D-QUICKPLOT `.qplog` batch macros with sandbox validation, DPI-independent `Alt+M R` triggering + toolbar fallback, file-dialog automation, and output verification.
+- Added `delft3d://docs/qplog-keywords` MCP resource and FastMCP server `instructions` documenting verified `.qplog` keywords (`1vecunit`, `vecscalem`, `thindist`, `climmin`/`climmax`, `colbarhorz`, `title` after `addtoplot`, `closefigure`, `close`).
+
+### Fixed
+- Fixed `post_plot_snapshot(plot_kind="grid_bathy")` failing with `DEP count mismatch` on Delft3D-FLOW `MNKmax`-padded `(gm+1, gn+1)` `.dep` files by unifying matrix loading in `read_dep_matrix`.
+- Added `"d3d_qp.exec"` (alongside classic `"rgfgrid.exe"`, `"quickin.exe"`, `"dido.exe"`) and `class_name` / `is_foreground` metadata to `list_delft3d_windows` so QUICKPLOT `#32770` file dialogs and MATLAB `Figure` windows are never hidden.
+- Added `"SplitButton"` support, same-PID dialog fallback, `bring_window_to_front`, `"keys"` alias for `"send_keys"`, and complete `gui_ui_action` schema documentation in `qt5_adapter.py` and `server.py`.
+- Added an explicit fast-fail error in `gui_launch_module` when a `.qplog`/`.m` file is passed as `target_file` to `quickplot` (`d3d_qp.exe` ignores `.qplog` CLI arguments).
+
 ## [1.0.0] - 2026-11-23
 
 ### Added
