@@ -11,10 +11,16 @@ from delft3d_mcp.domain.boundaries import (
     format_obs_file,
     format_wnd_file,
 )
-from delft3d_mcp.domain.mdf import MdfDocument, format_ddb, format_dry_points, format_thin_dams
+from delft3d_mcp.domain.mdf import (
+    MdfDocument,
+    format_ddb,
+    format_dry_points,
+    format_thin_dams,
+    read_mdw,
+    write_mdw,
+)
 from delft3d_mcp.domain.tide_wes import build_tide_analysis_input, build_wes_input
 from delft3d_mcp.domain.waq_part import build_part_inp, update_waq_inp
-from delft3d_mcp.domain.wave import read_mdw, write_mdw
 
 
 def test_mdf_lossless_roundtrip() -> None:
@@ -30,10 +36,11 @@ def test_mdf_lossless_roundtrip() -> None:
     assert doc.get("MNKmax") == [6, 6, 1]
     assert doc.get("Filcco") == "basin.grd"
 
-    doc.set_many({"Dt": 0.5, "Tstop": 60.0, "Waveol": True})
+    doc.set_many({"Dt": "0.5", "Tstop": 60.0, "Waveol": True})
     out = doc.to_text()
     assert "* Test MDF comment" in out
     assert "Dt     = 0.5" in out
+    assert "#0.5#" not in out
     assert "Tstop  = 60" in out
     assert "Waveol = #Y#" in out
 
@@ -54,12 +61,13 @@ def test_boundaries_and_wave_waq_part_formats(tmp_path: Path) -> None:
     assert "10.0000" in format_wnd_file([{"time_min": 0.0, "speed_ms": 10.0, "direction_deg": 180.0}])
     assert "3     4" in format_dry_points([(3, 4)])
     assert "U" in format_thin_dams([{"m1": 2, "n1": 2, "m2": 2, "n2": 4, "direction": "U"}])
-    assert "dom1.grd" in format_ddb(
-        [{"dom_a": "dom1", "m1a": 1, "n1a": 1, "m2a": 1, "n2a": 5, "dom_b": "dom2", "m1b": 5, "n1b": 1, "m2b": 5, "n2b": 5}]
+    ddb_txt = format_ddb(
+        [{"dom_a": "dom1", "m1a": 1, "n1a": 1, "m2a": 1, "n2a": 5, "dom_b": "dom2", "m1b": 5, "n1b": 1, "m2b": 7, "n2b": 5}]
     )
+    assert "dom1.grd" in ddb_txt and "    7     5" in ddb_txt
 
     mdw_path = tmp_path / "wave.mdw"
-    mdw_txt = write_mdw(mdw_path, {"General": {"Version": "4.00"}, "Domain": {"Grid": "basin.grd"}})
+    mdw_txt = write_mdw({"General": {"Version": "4.00"}, "Domain": {"Grid": "basin.grd"}})
     mdw_path.write_text(mdw_txt, encoding="utf-8")
     parsed_mdw = read_mdw(mdw_path)
     assert parsed_mdw["Domain"]["Grid"] == "basin.grd"

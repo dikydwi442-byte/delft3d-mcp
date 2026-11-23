@@ -29,6 +29,8 @@ from delft3d_mcp.domain.mdf import (
     format_dry_points,
     format_thin_dams,
     parse_ini_blocks,
+    read_mdw,
+    write_mdw,
 )
 from delft3d_mcp.domain.tide_wes import (
     build_rtc_config,
@@ -41,9 +43,11 @@ from delft3d_mcp.domain.waq_part import (
     list_waq_processes_from_install,
     update_waq_inp,
 )
-from delft3d_mcp.domain.wave import read_mdw, write_mdw
-from delft3d_mcp.gui.qt5_adapter import execute_qt5_action, inspect_qt5_controls
-from delft3d_mcp.gui.tcltk_adapter import send_tcltk_close_or_keys
+from delft3d_mcp.gui.qt5_adapter import (
+    execute_qt5_action,
+    inspect_qt5_controls,
+    send_tcltk_close_or_keys,
+)
 from delft3d_mcp.gui.win32_bridge import (
     capture_window_screenshot,
     launch_gui_module,
@@ -51,11 +55,11 @@ from delft3d_mcp.gui.win32_bridge import (
 )
 from delft3d_mcp.post.extract import (
     compute_skill_metrics,
+    export_grid_geojson,
     export_nefis_to_netcdf,
     extract_nefis_slice,
     list_nefis_groups,
 )
-from delft3d_mcp.post.gis import export_grid_geojson
 from delft3d_mcp.post.quickplot import render_grid_and_bathy_png, render_timeseries_png
 from delft3d_mcp.runner.job_manager import JobManager
 from delft3d_mcp.runner.validator import validate_flow_case, validate_wave_case
@@ -90,6 +94,22 @@ def ctx() -> AppContext:
     return _CTX
 
 
+def _opt_safe_path(raw: str | None, workspace: str | None = None, must_exist: bool = True) -> Path | None:
+    if not raw:
+        return None
+    return ctx().registry.resolve_safe_path(raw, workspace=workspace, must_exist=must_exist)[0]
+
+
+def _read_dep_matrix(core: Any, dep_p: Path, gm: int, gn: int) -> tuple[np.ndarray[Any, Any], bool]:
+    """Read .dep file supporting either MNKmax-padded (gm+1, gn+1) or raw grid (gm, gn) shape."""
+    try:
+        arr = np.asarray(core.read_dep_file(str(dep_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
+        return arr, True
+    except Exception:
+        arr = np.asarray(core.read_dep_file(str(dep_p), gm, gn), dtype=float).reshape((gn, gm))
+        return arr, False
+
+
 # ==============================================================================
 # 1. PROJECT & SAFETY (5 tools)
 # ==============================================================================
@@ -117,6 +137,8 @@ def project_inspect(workspace: str | None = None) -> dict[str, Any]:
     )
     summary: dict[str, Any] = {
         "delft3d_root": str(c.paths.root),
+        "delft3d_version": c.paths.version_label,
+        "delft3d_layout": c.paths.layout_kind,
         "delft3d_installed": c.paths.d_hydro.exists(),
         "active_workspace": c.registry.active_name,
         "workspace_root": str(ws_root) if ws_root else None,
@@ -551,12 +573,7 @@ def bathy_operations(
         return {"out_xyz_path": str(out_xyz), "sample_count": len(lines)}
 
     dep_p, ws_root = ctx().registry.resolve_safe_path(dep_path, workspace=workspace, must_exist=True)
-    try:
-        vals1 = np.asarray(core.read_dep_file(str(dep_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
-        is_padded = True
-    except Exception:
-        vals1 = np.asarray(core.read_dep_file(str(dep_p), gm, gn), dtype=float).reshape((gn, gm))
-        is_padded = False
+    vals1, is_padded = _read_dep_matrix(core, dep_p, gm, gn)
 
     if act == "volumes_areas":
         gx = np.asarray(g["x"], dtype=float).reshape((gn, gm))
@@ -594,10 +611,7 @@ def bathy_operations(
         if not second_dep_path:
             raise ValueError("second_dep_path is required for combine.")
         dep2_p, _ = ctx().registry.resolve_safe_path(second_dep_path, workspace=workspace, must_exist=True)
-        try:
-            vals2 = np.asarray(core.read_dep_file(str(dep2_p), gm + 1, gn + 1), dtype=float).reshape((gn + 1, gm + 1))[:gn, :gm]
-        except Exception:
-            vals2 = np.asarray(core.read_dep_file(str(dep2_p), gm, gn), dtype=float).reshape((gn, gm))
+        vals2, _ = _read_dep_matrix(core, dep2_p, gm, gn)
         m1 = np.abs(vals1 - (-999.0)) > 1e-4
         m2 = np.abs(vals2 - (-999.0)) > 1e-4
         both = m1 & m2
@@ -910,7 +924,7 @@ def wave_read_write_mdw(
         p, _ = ctx().registry.resolve_safe_path(mdw_path, workspace=workspace, must_exist=True)
         return {"mdw_path": str(p), "sections": read_mdw(p)}
     p, ws = ctx().registry.resolve_safe_path(mdw_path, workspace=workspace)
-    content = write_mdw(p, sections)
+    content = write_mdw(sections)
     atomic_write_text(p, content, ws, backup_label="mdw_write")
     return {"mdw_path": str(p), "sections": list(sections.keys())}
 
@@ -1097,11 +1111,7 @@ def post_list_nefis_vars(
 ) -> dict[str, Any]:
     """List groups, dimensions, and elements inside a Delft3D NEFIS (.dat/.def) output file."""
     dat_p, _ = ctx().registry.resolve_safe_path(dat_path, workspace=workspace, must_exist=True)
-    def_p = (
-        ctx().registry.resolve_safe_path(def_path, workspace=workspace, must_exist=True)[0]
-        if def_path
-        else None
-    )
+    def_p = _opt_safe_path(def_path, workspace=workspace)
     groups = list_nefis_groups(dat_p, _get_core(), def_path=def_p)
     return {"dat_path": str(dat_p), "group_count": len(groups), "groups": groups}
 
@@ -1118,11 +1128,7 @@ def post_extract_timeseries(
 ) -> dict[str, Any]:
     """Extract time-series element data from NEFIS (e.g. trih-* his-series) via Rust NEFIS engine."""
     dat_p, _ = ctx().registry.resolve_safe_path(dat_path, workspace=workspace, must_exist=True)
-    def_p = (
-        ctx().registry.resolve_safe_path(def_path, workspace=workspace, must_exist=True)[0]
-        if def_path
-        else None
-    )
+    def_p = _opt_safe_path(def_path, workspace=workspace)
     return extract_nefis_slice(
         dat_p, group_name, element_name, _get_core(), vd_start=vd_start, vd_end=vd_end, def_path=def_p
     )
@@ -1139,11 +1145,7 @@ def post_extract_map_slice(
 ) -> dict[str, Any]:
     """Extract a spatial map slice at a given variable-dimension index from NEFIS (e.g. trim-*)."""
     dat_p, _ = ctx().registry.resolve_safe_path(dat_path, workspace=workspace, must_exist=True)
-    def_p = (
-        ctx().registry.resolve_safe_path(def_path, workspace=workspace, must_exist=True)[0]
-        if def_path
-        else None
-    )
+    def_p = _opt_safe_path(def_path, workspace=workspace)
     return extract_nefis_slice(
         dat_p,
         group_name,

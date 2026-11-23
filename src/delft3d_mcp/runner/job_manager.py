@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import subprocess
@@ -19,6 +20,31 @@ from delft3d_mcp.runner.env import build_kernel_env, generate_config_d_hydro_xml
 logger = logging.getLogger("delft3d_mcp.runner")
 
 MAX_CONCURRENT_JOBS = 2
+
+ALLOWED_KERNEL_PROCESS_NAMES = {
+    "d_hydro.exe",
+    "trisim.exe",
+    "mpiexec.exe",
+    "hydra_bstrap_proxy.exe",
+    "pmi_proxy.exe",
+    "wave.exe",
+    "swan_omp.exe",
+    "swan_mpi.exe",
+    "delwaq.exe",
+    "delwaq2.exe",
+    "delpar.exe",
+    "ddcouple.exe",
+    "mormerge.exe",
+}
+
+
+def _is_delft3d_kernel_process(pid: int) -> bool:
+    """Verify PID belongs to a genuine Delft3D kernel process to prevent PID-reuse kills."""
+    try:
+        name = psutil.Process(pid).name().lower()
+        return name in ALLOWED_KERNEL_PROCESS_NAMES
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
 
 
 @dataclass
@@ -78,8 +104,7 @@ class JobManager:
                 self._save()
             return
 
-        # Fallback: check OS PIDs if server restarted
-        alive = any(psutil.pid_exists(pid) for pid in job.pids)
+        alive = any(_is_delft3d_kernel_process(pid) for pid in job.pids)
         if not alive:
             job.status = "exited"
             job.finished_at = datetime.now(tz=UTC).isoformat()
@@ -145,11 +170,9 @@ class JobManager:
             if mode == "flow_wave_coupled":
                 if wave_mdw_file is None:
                     raise ValueError("wave_mdw_file is required for flow_wave_coupled mode.")
-                # Verified from run_dflow2d3d_parallel_dwaves.bat: wave.exe <mdw> 1
                 companion_cmd = [str(self.paths.wave_exe), wave_mdw_file.name, "1"]
 
         elif mode == "wave_standalone":
-            # Verified from run_dwaves.bat: wave.exe <mdw> 0
             cmd = [str(self.paths.wave_exe), rel_input, "0"]
         elif mode == "waq":
             cmd = [str(self.paths.delwaq_exe), rel_input, *(extra_args or [])]
@@ -159,37 +182,39 @@ class JobManager:
         else:
             raise ValueError(f"Unsupported simulation mode: {mode}")
 
-        log_fh = log_path.open("ab")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         handles: list[subprocess.Popen[bytes]] = []
         try:
-            p1 = subprocess.Popen(
-                cmd,
-                cwd=str(work_dir),
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log_fh,
-                stderr=subprocess.STDOUT,
-                shell=False,
-                creationflags=creationflags,
-            )
-            handles.append(p1)
-            if companion_cmd is not None:
-                comp_log = (jobs_dir / f"{job_id}_wave.log").open("ab")
-                p2 = subprocess.Popen(
-                    companion_cmd,
+            with log_path.open("ab") as log_fh:
+                p1 = subprocess.Popen(
+                    cmd,
                     cwd=str(work_dir),
                     env=env,
                     stdin=subprocess.DEVNULL,
-                    stdout=comp_log,
+                    stdout=log_fh,
                     stderr=subprocess.STDOUT,
                     shell=False,
                     creationflags=creationflags,
                 )
-                handles.append(p2)
-                comp_log.close()
-        finally:
-            log_fh.close()
+                handles.append(p1)
+            if companion_cmd is not None:
+                with (jobs_dir / f"{job_id}_wave.log").open("ab") as comp_log:
+                    p2 = subprocess.Popen(
+                        companion_cmd,
+                        cwd=str(work_dir),
+                        env=env,
+                        stdin=subprocess.DEVNULL,
+                        stdout=comp_log,
+                        stderr=subprocess.STDOUT,
+                        shell=False,
+                        creationflags=creationflags,
+                    )
+                    handles.append(p2)
+        except Exception:
+            for h in handles:
+                with contextlib.suppress(Exception):
+                    h.terminate()
+            raise
 
         job = SimJob(
             job_id=job_id,
@@ -222,14 +247,22 @@ class JobManager:
         job = self._jobs.get(job_id)
         if not job:
             raise KeyError(f"Job not found: {job_id}")
-        for pid in job.pids:
-            try:
-                proc = psutil.Process(pid)
-                for child in proc.children(recursive=True):
-                    child.terminate()
-                proc.terminate()
-            except psutil.NoSuchProcess:
-                pass
+        handles = self._handles.get(job_id, [])
+        if handles:
+            for h in handles:
+                with contextlib.suppress(Exception):
+                    proc = psutil.Process(h.pid)
+                    for child in proc.children(recursive=True):
+                        child.terminate()
+                    proc.terminate()
+        else:
+            for pid in job.pids:
+                if _is_delft3d_kernel_process(pid):
+                    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                        proc = psutil.Process(pid)
+                        for child in proc.children(recursive=True):
+                            child.terminate()
+                        proc.terminate()
         job.status = "stopped"
         job.finished_at = datetime.now(tz=UTC).isoformat()
         self._save()
@@ -243,6 +276,8 @@ class JobManager:
         timeout_sec: int = 120,
     ) -> dict[str, Any]:
         """Run short Delft3D CLI utilities synchronously with captured output."""
+        guis = self.paths.guis_x64
+        kbin = self.paths.kernels_bin
         exe_map: dict[str, Path] = {
             "agrhyd": self.paths.agrhyd_exe,
             "ddcouple": self.paths.ddcouple_exe,
@@ -257,6 +292,14 @@ class JobManager:
             "delft3d2shape": self.paths.delft3d2shape_exe,
             "delwaq2raster": self.paths.delwaq2raster_exe,
             "vs": self.paths.vs_exe,
+            "plct": guis / "dwaq" / "bin" / "plct.exe",
+            "nestwq1": guis / "dwaq" / "bin" / "nestwq1.exe",
+            "nestwq2": guis / "dwaq" / "bin" / "nestwq2.exe",
+            "waqmerge": kbin / "waqmerge.exe",
+            "triana": guis / "dflow2d3d" / "bin" / "triana.exe",
+            "kubint": kbin / "kubint.exe",
+            "lint": kbin / "lint.exe",
+            "datsel": kbin / "datsel.exe",
         }
         exe = exe_map.get(utility.lower())
         if not exe or not exe.exists():

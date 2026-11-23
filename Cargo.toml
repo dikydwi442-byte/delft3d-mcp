@@ -3,9 +3,14 @@ resolver = "2"
 members = ["crates/delft3d_core"]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
 
 [workspace.lints.rust]
 unsafe_code = "warn"

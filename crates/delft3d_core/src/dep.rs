@@ -190,8 +190,11 @@ pub fn interpolate_xyz_to_grid(
                 return best_z;
             }
 
-            // IDW with optional k-nearest selection
-            let mut candidates: Vec<(f64, f64)> = Vec::new();
+            // IDW with bounded top-K selection (O(K) memory per grid node)
+            let mut candidates: Vec<(f64, f64)> = Vec::with_capacity(k_limit);
+            let mut worst_idx = 0_usize;
+            let mut worst_d2 = -1.0_f64;
+
             for &[sx, sy, sz] in samples {
                 let dx = gx - sx;
                 let dy = gy - sy;
@@ -204,14 +207,26 @@ pub fn interpolate_xyz_to_grid(
                         continue;
                     }
                 }
-                candidates.push((d2, sz));
+                if candidates.len() < k_limit {
+                    if d2 > worst_d2 {
+                        worst_d2 = d2;
+                        worst_idx = candidates.len();
+                    }
+                    candidates.push((d2, sz));
+                } else if d2 < worst_d2 {
+                    candidates[worst_idx] = (d2, sz);
+                    worst_idx = 0;
+                    worst_d2 = candidates[0].0;
+                    for (i, &(cd2, _)) in candidates.iter().enumerate().skip(1) {
+                        if cd2 > worst_d2 {
+                            worst_d2 = cd2;
+                            worst_idx = i;
+                        }
+                    }
+                }
             }
             if candidates.is_empty() {
                 return DEFAULT_MISSING_DEP;
-            }
-            if candidates.len() > k_limit {
-                candidates.select_nth_unstable_by(k_limit, |a, b| a.0.total_cmp(&b.0));
-                candidates.truncate(k_limit);
             }
             let half_p = power * 0.5;
             let mut w_sum = 0.0_f64;

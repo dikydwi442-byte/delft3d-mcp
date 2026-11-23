@@ -1,15 +1,12 @@
-"""NEFIS extraction via Rust core with optional NetCDF/MATLAB cross-validation."""
+"""NEFIS extraction, CF NetCDF4 & GeoJSON export, and calibration skill metrics."""
 
 from __future__ import annotations
 
-import shutil
-import subprocess
+import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-from delft3d_mcp.config import Delft3DPaths
 
 
 def list_nefis_groups(dat_path: Path, core_mod: Any, def_path: Path | None = None) -> list[dict[str, Any]]:
@@ -53,42 +50,6 @@ def extract_nefis_slice(
     else:
         summary["values_preview"] = vals[:100]
     return summary
-
-
-def matlab_vs_let_bridge(
-    paths: Delft3DPaths,
-    dat_path: Path,
-    group_name: str,
-    element_name: str,
-    timeout_sec: int = 60,
-) -> dict[str, Any]:
-    """Optional cross-check using installed MATLAB + delft3d_matlab vs_use/vs_let."""
-    matlab_exe = shutil.which("matlab")
-    if not matlab_exe:
-        raise FileNotFoundError("MATLAB executable not found in PATH.")
-
-    dm_dir = str(paths.delft3d_matlab_dir).replace("'", "''")
-    dfile = str(dat_path).replace("'", "''")
-    grp = group_name.replace("'", "''")
-    elm = element_name.replace("'", "''")
-    cmd_str = (
-        f"addpath('{dm_dir}'); "
-        f"nfs = vs_use('{dfile}', 'quiet'); "
-        f"val = vs_let(nfs, '{grp}', '{elm}', 'quiet'); "
-        f"fprintf('SIZE=%s\\nMIN=%.10g\\nMAX=%.10g\\n', mat2str(size(val)), min(val(:)), max(val(:)));"
-    )
-    proc = subprocess.run(
-        [matlab_exe, "-batch", cmd_str],
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        shell=False,
-    )
-    return {
-        "returncode": proc.returncode,
-        "stdout": proc.stdout.strip(),
-        "stderr": proc.stderr.strip(),
-    }
 
 
 def export_nefis_to_netcdf(
@@ -140,6 +101,51 @@ def export_nefis_to_netcdf(
                 exported_vars.append(f"{gname}/{elem}")
 
     return {"nc_path": str(out_nc_path), "exported_count": len(exported_vars), "variables": exported_vars}
+
+
+def export_grid_geojson(grd_path: Path, out_geojson: Path, core_mod: Any, stride: int = 1) -> dict[str, Any]:
+    """Export Delft3D grid lines/cells to GeoJSON without external GIS dependencies."""
+    g = core_mod.read_grd(str(grd_path))
+    m_max, n_max = int(g["m_max"]), int(g["n_max"])
+    x = g["x"]
+    y = g["y"]
+    miss = float(g["missing_value"])
+    step = max(1, int(stride))
+
+    features: list[dict[str, Any]] = []
+    for n in range(0, n_max, step):
+        coords = [
+            [x[n * m_max + m], y[n * m_max + m]]
+            for m in range(m_max)
+            if abs(x[n * m_max + m] - miss) > 1e-6 or abs(y[n * m_max + m] - miss) > 1e-6
+        ]
+        if len(coords) >= 2:
+            features.append(
+                {
+                    "type": "Feature",
+                    "properties": {"axis": "eta", "index": n + 1},
+                    "geometry": {"type": "LineString", "coordinates": coords},
+                }
+            )
+    for m in range(0, m_max, step):
+        coords = [
+            [x[n * m_max + m], y[n * m_max + m]]
+            for n in range(n_max)
+            if abs(x[n * m_max + m] - miss) > 1e-6 or abs(y[n * m_max + m] - miss) > 1e-6
+        ]
+        if len(coords) >= 2:
+            features.append(
+                {
+                    "type": "Feature",
+                    "properties": {"axis": "xi", "index": m + 1},
+                    "geometry": {"type": "LineString", "coordinates": coords},
+                }
+            )
+
+    fc = {"type": "FeatureCollection", "features": features}
+    out_geojson.parent.mkdir(parents=True, exist_ok=True)
+    out_geojson.write_text(json.dumps(fc), encoding="utf-8")
+    return {"geojson_path": str(out_geojson), "feature_count": len(features)}
 
 
 def compute_skill_metrics(observed: list[float], simulated: list[float]) -> dict[str, float]:

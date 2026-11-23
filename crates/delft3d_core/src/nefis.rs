@@ -545,10 +545,11 @@ impl NefisFile {
     ) -> Result<Option<u64>, NefisError> {
         let ab = self.addr.bytes();
         let nil = self.addr.nil();
-        let b0 = vd_index_0based & 0xFF;
-        let b1 = (vd_index_0based >> 8) & 0xFF;
-        let b2 = (vd_index_0based >> 16) & 0xFF;
-        let b3 = (vd_index_0based >> 24) & 0xFF;
+        let vd_1based = vd_index_0based + 1;
+        let b0 = vd_1based & 0xFF;
+        let b1 = (vd_1based >> 8) & 0xFF;
+        let b2 = (vd_1based >> 16) & 0xFF;
+        let b3 = (vd_1based >> 24) & 0xFF;
         let mut table_off = (grp.offset as usize) + 392 + 4 * ab;
         for b in [b3, b2, b1] {
             let next = read_addr(&self.dat_map, table_off + b * ab, self.endian, self.addr)?;

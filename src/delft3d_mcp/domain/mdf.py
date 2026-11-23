@@ -1,4 +1,4 @@
-"""Lossless parser, writer, and schema helpers for Delft3D-FLOW (.mdf, .ddb, .mor, .sed, .dry, .thd)."""
+"""Lossless parser, writer, and schema helpers for Delft3D-FLOW (.mdf, .ddb, .mor, .sed, .dry, .thd) and WAVE (.mdw)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,44 @@ from typing import Any
 
 _KV_RE = re.compile(r"^([A-Za-z0-9_]+)\s*=\s*(.*)$")
 
+_STRING_MDF_KEYS = {
+    "ident",
+    "runtxt",
+    "commnt",
+    "itdate",
+    "tunit",
+    "sub1",
+    "sub2",
+    "roumet",
+    "restid",
+    "online",
+    "waveol",
+    "watiq",
+    "mudlay",
+    "fls",
+    "dco",
+    "dryflp",
+    "dpsopt",
+    "dpuopt",
+    "momsol",
+    "trasol",
+    "forfuv",
+    "forfww",
+    "temeqs",
+    "saleqs",
+    "ktemp",
+    "keva",
+    "ivapop",
+    "cstbnd",
+}
 
-def _format_mdf_value(val: Any) -> str:
+
+def _is_string_mdf_key(key: str) -> bool:
+    k = key.lower().strip()
+    return k in _STRING_MDF_KEYS or k.startswith(("fil", "nam", "fmt", "comm"))
+
+
+def _format_mdf_value(val: Any, key: str = "") -> str:
     if isinstance(val, bool):
         return "#Y#" if val else "#N#"
     if isinstance(val, int):
@@ -24,6 +60,13 @@ def _format_mdf_value(val: Any) -> str:
     s = str(val).strip()
     if s.startswith("#") and s.endswith("#") and len(s) >= 2:
         return s
+    if key and not _is_string_mdf_key(key):
+        try:
+            if "." in s or "e" in s.lower():
+                return f"{float(s):.7g}"
+            return str(int(s))
+        except ValueError:
+            pass
     return f"#{s}#"
 
 
@@ -73,7 +116,6 @@ class MdfDocument:
                 return
             joined = " ".join(v for v in acc_values if v.strip())
             if len(acc_values) > 1:
-                # Multi-line numeric/list values
                 toks = joined.split()
                 vals: list[Any] = []
                 for t in toks:
@@ -151,11 +193,11 @@ class MdfDocument:
                     seen_lower.add(k_low)
                     skip_continuation = True
                     if isinstance(new_val, list) and actual_key.lower() in {"thick", "t"}:
-                        new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val[0])}")
+                        new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val[0], actual_key)}")
                         for extra in new_val[1:]:
-                            new_lines.append(f"         {_format_mdf_value(extra)}")
+                            new_lines.append(f"         {_format_mdf_value(extra, actual_key)}")
                     else:
-                        new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val)}")
+                        new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val, actual_key)}")
                 else:
                     new_lines.append(line)
             else:
@@ -164,7 +206,7 @@ class MdfDocument:
 
         for k_low, (actual_key, new_val) in canon_updates.items():
             if k_low not in seen_lower:
-                new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val)}")
+                new_lines.append(f"{actual_key:<7}= {_format_mdf_value(new_val, actual_key)}")
 
         self.lines = new_lines
 
@@ -172,7 +214,7 @@ class MdfDocument:
         if not self.lines:
             out: list[str] = []
             for k in self.key_order:
-                out.append(f"{k:<7}= {_format_mdf_value(self.params[k])}")
+                out.append(f"{k:<7}= {_format_mdf_value(self.params[k], k)}")
             return "\n".join(out) + "\n"
         return "\n".join(self.lines).rstrip() + "\n"
 
@@ -195,12 +237,11 @@ class MdfDocument:
 
 def parse_ini_blocks(text: str) -> dict[str, dict[str, str]]:
     """Parse Deltares INI-like files (.mor, .sed, .mdw)."""
-    sections: dict[str, dict[str, str]] = {}
+    sections: dict[str, dict[str, str]] = {"_global": {}}
     current = "_global"
-    sections[current] = {}
     for raw in text.splitlines():
         line = raw.split("*")[0].split("#")[0].strip() if raw.strip().startswith(("*", "#")) else raw.strip()
-        if not line or line.startswith("*") or line.startswith(";"):
+        if not line or line.startswith(("*", ";")):
             continue
         if line.startswith("[") and line.endswith("]"):
             current = line[1:-1].strip()
@@ -225,6 +266,15 @@ def dump_ini_blocks(sections: dict[str, dict[str, str]], header_comment: str = "
     return "\n".join(lines).rstrip() + "\n"
 
 
+def read_mdw(path: Path) -> dict[str, dict[str, str]]:
+    return parse_ini_blocks(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def write_mdw(sections: dict[str, dict[str, Any]]) -> str:
+    normalized = {sec: {k: str(v) for k, v in kv.items()} for sec, kv in sections.items()}
+    return dump_ini_blocks(normalized, header_comment="Delft3D-WAVE MDW")
+
+
 def format_dry_points(points: list[tuple[int, int]]) -> str:
     """Format .dry file (m n pairs)."""
     return "\n".join(f"{m:>6}{n:>6}" for m, n in points) + ("\n" if points else "")
@@ -245,6 +295,6 @@ def format_ddb(links: list[dict[str, Any]]) -> str:
     for lk in links:
         lines.append(
             f"{lk['dom_a']}.grd  {int(lk['m1a']):>5} {int(lk['n1a']):>5} {int(lk['m2a']):>5} {int(lk['n2a']):>5}  "
-            f"{lk['dom_b']}.grd  {int(lk['m1b']):>5} {int(lk['n1b']):>5} {int(lk['n2b']):>5} {int(lk['n2b']):>5}"
+            f"{lk['dom_b']}.grd  {int(lk['m1b']):>5} {int(lk['n1b']):>5} {int(lk['m2b']):>5} {int(lk['n2b']):>5}"
         )
     return "\n".join(lines) + ("\n" if lines else "")

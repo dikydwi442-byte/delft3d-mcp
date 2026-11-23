@@ -25,6 +25,9 @@ def test_sandbox_blocks_traversal_and_protected_dirs(tmp_workspace, tmp_path: Pa
         with pytest.raises(SecurityError):
             reg.register(DEFAULT_D3D_ROOT)
 
+    with pytest.raises(SecurityError):
+        reg.register("C:\\")
+
     safe, root = reg.resolve_safe_path("sub/model.mdf")
     assert root == ws_dir.resolve()
     assert safe == (ws_dir / "sub" / "model.mdf").resolve()

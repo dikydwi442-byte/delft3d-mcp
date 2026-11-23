@@ -1,3 +1,3 @@
-"""Production-grade Hybrid Polyglot MCP Server for Deltares Delft3D 4.07.02."""
+"""High-performance Hybrid Polyglot MCP Server for Deltares Delft3D."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

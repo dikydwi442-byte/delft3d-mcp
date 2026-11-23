@@ -124,6 +124,7 @@ def test_e2e_micro_flow_simulation_and_nefis(tmp_path: Path) -> None:
     assert "map-series" in [g["name"] for g in groups_map]
     s1 = _core.nefis_read_element(str(trim_dat), "map-series", "S1", None, 0, 1)
     assert len(s1["values"]) == 36
+    assert all(v == v for v in s1["values"]), "Step 0 (vd=0) must not contain NaN values"
 
     from delft3d_mcp.post.extract import export_nefis_to_netcdf
 

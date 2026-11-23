@@ -6,8 +6,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from delft3d_mcp.domain.mdf import MdfDocument
-from delft3d_mcp.domain.wave import read_mdw
+from delft3d_mcp.domain.mdf import MdfDocument, read_mdw
 
 
 def validate_flow_case(mdf_path: Path, core_mod: Any | None = None) -> dict[str, Any]:
