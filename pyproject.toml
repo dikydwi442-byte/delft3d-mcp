@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "delft3d-mcp"
 version = "1.0.0"
-description = "High-performance Hybrid Polyglot MCP server for Deltares Delft3D on Windows"
+description = "Hybrid Rust and Python MCP server for Deltares Delft3D on Windows"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }

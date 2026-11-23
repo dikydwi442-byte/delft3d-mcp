@@ -1,75 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#071324"/>
-      <stop offset="50%" stop-color="#0c2647"/>
-      <stop offset="100%" stop-color="#0f3d5e"/>
+    <linearGradient id="tileGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1996cb"/>
+      <stop offset="55%" stop-color="#0d7fab"/>
+      <stop offset="100%" stop-color="#086993"/>
     </linearGradient>
-    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#00d2ff"/>
-      <stop offset="100%" stop-color="#3a7bd5"/>
+    <linearGradient id="frameGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f7f8fa"/>
+      <stop offset="100%" stop-color="#d8dde3"/>
     </linearGradient>
-    <linearGradient id="rustGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#ff7e5f"/>
-      <stop offset="100%" stop-color="#feb47b"/>
-    </linearGradient>
+    <filter id="outerShadow" x="-12%" y="-12%" width="124%" height="124%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
   </defs>
 
-  <rect width="1200" height="320" rx="18" fill="url(#bgGrad)"/>
+  <!-- Outer rounded frame -->
+  <rect x="16" y="16" width="224" height="224" rx="26" fill="url(#frameGrad)" filter="url(#outerShadow)"/>
 
-  <!-- Curvilinear Hydrodynamic Grid Overlay -->
-  <g stroke="#1f5f8b" stroke-width="1" stroke-opacity="0.35" fill="none">
-    <path d="M 0 240 Q 300 180 600 220 T 1200 200"/>
-    <path d="M 0 265 Q 300 205 600 245 T 1200 225"/>
-    <path d="M 0 290 Q 300 230 600 270 T 1200 250"/>
-    <path d="M 0 315 Q 300 255 600 295 T 1200 275"/>
-    <path d="M 150 180 Q 170 250 140 320"/>
-    <path d="M 300 175 Q 320 250 290 320"/>
-    <path d="M 450 185 Q 470 250 440 320"/>
-    <path d="M 600 195 Q 620 250 590 320"/>
-    <path d="M 750 190 Q 770 250 740 320"/>
-    <path d="M 900 180 Q 920 250 890 320"/>
-    <path d="M 1050 175 Q 1070 250 1040 320"/>
+  <!-- Inner blue gradient tile -->
+  <rect x="28" y="28" width="200" height="200" rx="18" fill="url(#tileGrad)"/>
+
+  <!-- Pentagon and radial network lines -->
+  <g stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Outer pentagon -->
+    <polygon points="128,64 196,113 170,192 86,192 60,113"/>
+    <!-- Spokes from center to pentagon vertices -->
+    <line x1="128" y1="135" x2="128" y2="64"/>
+    <line x1="128" y1="135" x2="196" y2="113"/>
+    <line x1="128" y1="135" x2="170" y2="192"/>
+    <line x1="128" y1="135" x2="86" y2="192"/>
+    <line x1="128" y1="135" x2="60" y2="113"/>
   </g>
 
-  <!-- Glowing Wave Contour -->
-  <path d="M 0 230 Q 280 165 580 215 T 1200 185" fill="none" stroke="url(#accentGrad)" stroke-width="3" stroke-opacity="0.75"/>
-
-  <!-- Top Pill Badge -->
-  <rect x="64" y="42" width="350" height="32" rx="16" fill="#103156" stroke="#00d2ff" stroke-width="1.2"/>
-  <text x="239" y="63" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#7be3ff" text-anchor="middle" letter-spacing="1.2">
-    MODEL CONTEXT PROTOCOL • WINDOWS X64
-  </text>
-
-  <!-- Main Title -->
-  <text x="64" y="132" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="52" font-weight="800" fill="#ffffff" letter-spacing="-0.5">
-    delft3d-mcp
-  </text>
-  <text x="395" y="132" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="24" font-weight="600" fill="#00d2ff">
-    v1.0.0
-  </text>
-
-  <!-- Subtitle -->
-  <text x="64" y="172" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="20" font-weight="400" fill="#c3d9ef">
-    Full-Spectrum Hydrodynamic, Wave, Morphology &amp; Water Quality Control Plane for Deltares Delft3D
-  </text>
-
-  <!-- Feature Metric Cards -->
-  <g transform="translate(64, 210)">
-    <rect x="0" y="0" width="220" height="64" rx="10" fill="#0b1f3a" fill-opacity="0.85" stroke="#235789" stroke-width="1.2"/>
-    <text x="18" y="26" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700" fill="url(#rustGrad)">RUST PYO3 ENGINE</text>
-    <text x="18" y="48" font-family="Segoe UI, Inter, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Rayon + Memmap NEFIS</text>
-
-    <rect x="240" y="0" width="220" height="64" rx="10" fill="#0b1f3a" fill-opacity="0.85" stroke="#235789" stroke-width="1.2"/>
-    <text x="258" y="26" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700" fill="#00d2ff">48 MODULAR TOOLS</text>
-    <text x="258" y="48" font-family="Segoe UI, Inter, sans-serif" font-size="16" font-weight="700" fill="#ffffff">All 7 Delft3D Domains</text>
-
-    <rect x="480" y="0" width="235" height="64" rx="10" fill="#0b1f3a" fill-opacity="0.85" stroke="#235789" stroke-width="1.2"/>
-    <text x="498" y="26" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700" fill="#6ee7b7">DIRECT KERNEL &amp; MPI</text>
-    <text x="498" y="48" font-family="Segoe UI, Inter, sans-serif" font-size="16" font-weight="700" fill="#ffffff">FLOW • WAVE • WAQ • PART</text>
-
-    <rect x="735" y="0" width="245" height="64" rx="10" fill="#0b1f3a" fill-opacity="0.85" stroke="#235789" stroke-width="1.2"/>
-    <text x="753" y="26" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700" fill="#c4b5fd">SMART GUI BRIDGE</text>
-    <text x="753" y="48" font-family="Segoe UI, Inter, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Qt5 UIA + PrintWindow</text>
+  <!-- White nodes -->
+  <g fill="#ffffff">
+    <circle cx="128" cy="135" r="19"/>
+    <circle cx="128" cy="64" r="18"/>
+    <circle cx="196" cy="113" r="18"/>
+    <circle cx="170" cy="192" r="18"/>
+    <circle cx="86" cy="192" r="18"/>
+    <circle cx="60" cy="113" r="18"/>
   </g>
 </svg>

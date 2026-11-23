@@ -1,107 +1,98 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="delft3d-mcp Banner" width="100%"/>
+  <img src="assets/banner.svg" alt="delft3d-mcp logo" width="128"/>
 </p>
 
+<h1 align="center">delft3d-mcp</h1>
+
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-00d2ff?style=flat-square" alt="Version 1.0.0"/>
+  <img src="https://img.shields.io/badge/Version-1.0.0-0078D6?style=flat-square" alt="Version 1.0.0"/>
   <img src="https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=flat-square&logo=windows" alt="Windows x64"/>
-  <img src="https://img.shields.io/badge/Core-Rust%20PyO3%20%2B%20Rayon-dea584?style=flat-square&logo=rust" alt="Rust Core"/>
-  <img src="https://img.shields.io/badge/Host-Python%203.12%20FastMCP-3776AB?style=flat-square&logo=python" alt="Python 3.12"/>
-  <img src="https://img.shields.io/badge/Delft3D-4.01%20--%204.07.02%2B-0f3d5e?style=flat-square" alt="Delft3D 4.x"/>
+  <img src="https://img.shields.io/badge/Core-Rust%20PyO3-dea584?style=flat-square&logo=rust" alt="Rust Core"/>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python" alt="Python 3.12"/>
+  <img src="https://img.shields.io/badge/Delft3D-4.01%20to%204.07.02%2B-0b6b94?style=flat-square" alt="Delft3D 4.x"/>
   <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="MIT License"/>
 </p>
 
-**`delft3d-mcp`** is a high-performance **Model Context Protocol (MCP)** server that gives MCP-compatible desktop clients complete, deterministic control over **Deltares Delft3D** on Windows—covering curvilinear grid generation, bathymetry interpolation, hydrodynamic/wave/morphology/water-quality model authoring, parallel MPI simulation execution, native NEFIS binary extraction, and live Windows GUI automation.
+`delft3d-mcp` is a Windows Model Context Protocol (MCP) server for Deltares Delft3D. It lets MCP-compatible desktop clients build grids, interpolate bathymetry, edit model inputs, launch local or MPI simulations, read NEFIS binary outputs, and control Delft3D desktop windows.
 
----
+## What it covers
 
-## Key Capabilities at a Glance
+- Memory-mapped 32-bit and 64-bit NEFIS reader (`trim-*`, `trih-*`, `wavm-*`), Transfinite Interpolation (TFI) curvilinear grid builder, Winslow elliptic orthogonalizer, parallel bathymetry interpolation (`idw`, `nearest`, `cell_average`), and a non-blocking `tri-diag` log scanner written in Rust (`delft3d_core`).
+- 48 tools covering RGFGRID, QUICKIN, DIDO, Delft3D-FLOW (2D/3D and morphology), Delft3D-WAVE (SWAN), Delft3D-WAQ, Delft3D-PART, TIDE, WES, RTC, and QUICKPLOT.
+- Pre-run validation that estimates Courant (CFL) numbers, checks `(M, N)` grid and bathymetry dimensions, and verifies referenced attribute files before a run starts.
+- Direct process execution (`shell=False`) for `d_hydro.exe`, `mpiexec.exe -localonly`, coupled `wave.exe <mdw> 1`, `delwaq.exe`, and `delpar.exe` with output routed to job logs so MCP `stdio` JSON-RPC framing stays intact.
+- Sandboxed file access limited to registered project folders (`WorkspaceRegistry`), with atomic writes and automatic backups saved under `.d3d_mcp_backups/`.
 
-- **Native Rust Compute Core (`delft3d_core`)**: Memory-mapped (`memmap2`) 32/64-bit **NEFIS** binary reader (`trim-*`, `trih-*`, `wavm-*`), **Transfinite Interpolation (TFI)** curvilinear grid generator, **Winslow Elliptic Grid Orthogonalizer**, parallel (`rayon`) **IDW / Nearest / Cell-Average** bathymetry interpolation, and non-blocking `tri-diag` log scanner.
-- **Complete 7-Domain Delft3D Coverage (48 Tools)**: Full read/write/run parity across **RGFGRID**, **QUICKIN**, **DIDO**, **Delft3D-FLOW (2D/3D & Morphology)**, **Delft3D-WAVE (SWAN)**, **Delft3D-WAQ**, **Delft3D-PART**, **TIDE/WES/RTC**, and **QUICKPLOT**.
-- **Pre-Run Physics & Dimension Validator**: Automatically checks Courant-Friedrichs-Lewy (**CFL**) stability numbers, `(M, N)` grid/bathymetry padding alignment, and missing file references before launching kernels.
-- **Zero-Fragility Native Kernel Runner**: Spawns `d_hydro.exe`, `mpiexec.exe -localonly`, coupled `wave.exe <mdw> 1`, `delwaq.exe`, and `delpar.exe` directly (`shell=False`) with isolated job logs so MCP `stdio` JSON-RPC framing is never polluted.
-- **Defense-in-Depth Sandbox & Auto-Rollback**: Strict workspace path containment (`WorkspaceRegistry`), atomic file replacement, and automatic timestamped `.d3d_mcp_backups` snapshots prior to every model edit.
-
----
-
-## End-to-End Workflow Flowchart
+## Typical workflow
 
 ```mermaid
 flowchart LR
-    A["1. Initialize Workspace\nproject_init_workspace"] --> B["2. Build & Orthogonalize Grid\ngrid_create_rect / curvilinear\ngrid_orthogonalize"]
-    B --> C["3. Interpolate Bathymetry\nbathy_interpolate_xyz\n(IDW / TIN / Cell Avg)"]
-    C --> D["4. Configure Model & Forcings\nflow_update_mdf\nflow_set_boundaries (.bnd/.bct/.bcc/.bch)"]
-    D --> E["5. Dry-Run Validation\nsim_validate\n(CFL, MNKmax, File Refs)"]
-    E --> F["6. Execute Kernel (Single / MPI / Coupled)\nsim_start -> sim_status -> sim_tail_log"]
-    F --> G["7. Extract & Visualize Outputs\npost_extract_timeseries / map_slice\npost_convert_netcdf_gis / post_plot_snapshot"]
+    A["1. Register workspace\nproject_init_workspace"] --> B["2. Build & check grid\ngrid_create_rect / curvilinear\ngrid_orthogonalize"]
+    B --> C["3. Interpolate bathymetry\nbathy_interpolate_xyz\n(idw / tin / cell_average)"]
+    C --> D["4. Set up model & boundaries\nflow_update_mdf\nflow_set_boundaries (.bnd/.bct/.bcc/.bch)"]
+    D --> E["5. Validate inputs\nsim_validate\n(CFL, MNKmax, file refs)"]
+    E --> F["6. Run simulation\nsim_start -> sim_status -> sim_tail_log"]
+    F --> G["7. Read & plot results\npost_extract_timeseries / map_slice\npost_convert_netcdf_gis / post_plot_snapshot"]
 ```
 
----
-
-## 3-Layer Hybrid Polyglot Architecture
+## Architecture
 
 ```mermaid
 flowchart TD
-    Client["MCP Client (Desktop IDE / Assistant)"] <-->|"JSON-RPC 2.0 over Clean Stdio"| Server["Python 3.12 MCP Host (48 Tools • 4 Resources • 3 Prompts)"]
+    Client["MCP Client (Desktop IDE / Assistant)"] <-->|"JSON-RPC 2.0 (stdio)"| Server["Python 3.12 MCP Host (48 Tools, 4 Resources, 3 Prompts)"]
 
-    subgraph Security["Security & Data Integrity Layer"]
-        Server --> Guard["Workspace Sandbox Guard (Blocks Traversal & System Paths)"]
-        Server --> Backup["Atomic File Writer & Auto-Backup (.d3d_mcp_backups)"]
-        Server --> Log["Stderr & Rotating File Logger (Zero Stdout Leak)"]
+    subgraph Security["Safety and logging"]
+        Server --> Guard["Workspace Sandbox Guard (blocks traversal and system dirs)"]
+        Server --> Backup["Atomic writer and .d3d_mcp_backups snapshots"]
+        Server --> Log["Stderr and rotating file logger"]
     end
 
-    subgraph Layer1["Layer 1: Rust PyO3 Engine & Scientific Domain Layer"]
-        Server --> Rust["Rust Core (delft3d_core.pyd via PyO3 + Rayon + Memmap2)"]
-        Rust --> Mesh["GRD / ENC / TEKAL (.ldb/.spl/.pol) + TFI & Winslow Elliptic Solver"]
-        Rust --> Bathy["Parallel XYZ -> DEP Interpolator (Top-K IDW, Nearest, Cell Avg)"]
-        Rust --> Nefis["Zero-Copy NEFIS Binary Reader (trim / trih / wavm)"]
-        Server --> Domain["Lossless Parsers (MDF, MDW, BND, BCT, BCC, BCH, MOR, SED, INP, RTC)"]
+    subgraph Layer1["Layer 1: Rust PyO3 core and domain parsers"]
+        Server --> Rust["Rust extension (delft3d_core.pyd via PyO3, rayon, memmap2)"]
+        Rust --> Mesh["GRD / ENC / TEKAL (.ldb/.spl/.pol) + TFI & elliptic smoother"]
+        Rust --> Bathy["Parallel XYZ -> DEP interpolator (top-K IDW, nearest, cell average)"]
+        Rust --> Nefis["Memory-mapped NEFIS reader (trim / trih / wavm)"]
+        Server --> Domain["Domain parsers (MDF, MDW, BND, BCT, BCC, BCH, MOR, SED, INP, RTC)"]
     end
 
-    subgraph Layer2["Layer 2: Direct Kernel Runner & Pre-Run Validator"]
-        Server --> Val["Pre-Run Validator (Courant CFL Estimator & Dimension Checker)"]
-        Server --> JobMgr["Async Job Manager + PID-Reuse Guard + Concurrency Limiter"]
-        JobMgr -->|"shell=False"| Exes["d_hydro.exe • mpiexec.exe -localonly • wave.exe • delwaq.exe • delpar.exe"]
-        Rust --> Tail["Non-Blocking tri-diag & Log Progress Scanner"]
+    subgraph Layer2["Layer 2: Direct kernel runner"]
+        Server --> Val["Pre-run validator (CFL estimate and dimension check)"]
+        Server --> JobMgr["Async job manager with PID-reuse guard"]
+        JobMgr -->|"shell=False"| Exes["d_hydro.exe, mpiexec.exe -localonly, wave.exe, delwaq.exe, delpar.exe"]
+        Rust --> Tail["tri-diag and log progress scanner"]
     end
 
-    subgraph Layer3["Layer 3: Smart Windows GUI Bridge"]
-        Server --> UIA["Qt5 UIA (Invoke/Toggle) + Win32 PrintWindow + PostMessage Fallback"]
-        UIA --> Apps["RGFGRID • QUICKIN • DIDO • d3d_menu • QUICKPLOT • VSI • Flow/Wave GUIs"]
+    subgraph Layer3["Layer 3: Windows desktop GUI bridge"]
+        Server --> UIA["Qt5 UIA (invoke/toggle) + Win32 PrintWindow + PostMessage"]
+        UIA --> Apps["RGFGRID, QUICKIN, DIDO, d3d_menu, QUICKPLOT, VSI, Flow/Wave GUIs"]
     end
 ```
 
----
+## Delft3D version compatibility
 
-## Delft3D Version Compatibility Matrix
+`Delft3DPaths.discover()` checks `DELFT3D_ROOT`, `D3D_HOME`, and standard Windows install paths (`C:\Program Files\Deltares\Delft3D*`, `C:\Program Files (x86)\Deltares\Delft3D*`, `C:\Delft3D*`).
 
-`delft3d-mcp` includes a **Multi-Version & Multi-Layout Auto-Resolver** (`Delft3DPaths.discover()`) that automatically detects your installed Delft3D version from `DELFT3D_ROOT`, `D3D_HOME`, or standard Windows installation directories (`C:\Program Files\Deltares\Delft3D*`, `C:\Delft3D*`).
-
-| Delft3D Version / Mode | Directory Layout | Compatibility Status | Supported Capabilities |
+| Delft3D version or mode | Directory layout | Status | What works |
 | :--- | :--- | :--- | :--- |
-| **Delft3D 4.05.xx – 4.07.02+** *(Modern Deltares Installer / OSS Build)* | `kernels\x64\bin` + `guis\x64\...` | **100% Full Native Support** | All 48 tools: FLOW, MPI, coupled WAVE (`wave.exe <mdw> 1`), WAQ, PART, TIDE, WES, RTC, NEFIS, NetCDF4, and Qt5/Tcl-Tk GUI Bridge (`mfe_app.exe`, `d3d_menu.exe`, `d3d_qp.exe`). |
-| **Delft3D 4.01.xx – 4.04.xx** *(Classic Unified `x64` / `win32` Build)* | `x64\<module>\bin` or `w32\<module>\bin` | **Auto-Resolved Compatible** | Automatic fallback to classic binary paths (`x64\dflow2d3d\bin\d_hydro.exe` / `trisim.exe`, `delwaq2.exe`, standalone `rgfgrid.exe`/`quickin.exe`), plus full domain & NEFIS support. |
-| **Headless / File-Only Workstation** *(No Local Delft3D Binaries Installed)* | `headless_file_only` | **Full Pre/Post-Processing** | Grid generation (`TFI`, `Elliptic`, `TEKAL`), Bathymetry interpolation (`IDW`, `TIN`, `Cell Avg`), MDF/MDW/Boundary authoring, native **NEFIS `.dat`/`.def` reading**, NetCDF4/GeoJSON export, harmonic tidal analysis, and skill metrics work **without** Delft3D installed. |
+| Delft3D 4.05.xx to 4.07.02+ (modern installer / OSS) | `kernels\x64\bin` + `guis\x64\...` | Full support | All 48 tools: FLOW, MPI, coupled WAVE (`wave.exe <mdw> 1`), WAQ, PART, TIDE, WES, RTC, NEFIS, NetCDF4, and the GUI bridge (`mfe_app.exe`, `d3d_menu.exe`, `d3d_qp.exe`). |
+| Delft3D 4.01.xx to 4.04.xx (classic `x64` / `win32`) | `x64\<module>\bin` or `w32\<module>\bin` | Compatible (auto-detected) | Falls back to classic binary paths (`d_hydro.exe` / `trisim.exe`, `delwaq2.exe`, `rgfgrid.exe`, `quickin.exe`) along with all domain and NEFIS tools. |
+| Headless / file-only workstation (no Delft3D installed) | `headless_file_only` | Pre- and post-processing | Grid building (`TFI`, elliptic smoothing, `TEKAL`), bathymetry interpolation (`idw`, `tin`, `cell_average`), MDF/MDW/boundary editing, NEFIS `.dat`/`.def` reading, NetCDF4/GeoJSON export, harmonic analysis, and skill metrics. |
 
----
+## Installation
 
-## Quick Installation & MCP Client Setup
-
-### Option A: From Precompiled Public Release Wheel (`dist/public/`)
+### From the precompiled wheel (`dist/public/`)
 
 ```powershell
-# Install the precompiled Windows x64 wheel into an isolated Python 3.12 tool environment
 uv tool install --python 3.12 --force .\delft3d_mcp-1.0.0-cp312-cp312-win_amd64.whl
 ```
 
-### Option B: From Local Repository Environment
+### From a local clone
 
 ```powershell
 uv sync --python 3.12 --all-groups
 ```
 
-### MCP Client Configuration (`mcp_config.json` / `claude_desktop_config.json`)
+### MCP client configuration (`mcp_config.json` or `claude_desktop_config.json`)
 
 ```json
 {
@@ -116,103 +107,95 @@ uv sync --python 3.12 --all-groups
   }
 }
 ```
-*(Note: `DELFT3D_ROOT` is optional; if omitted, `delft3d-mcp` auto-discovers the latest installed Delft3D 4.x folder on your machine).*
 
----
+`DELFT3D_ROOT` is optional. When omitted, the server scans local Deltares install folders automatically.
 
-## Complete Catalog of 48 MCP Tools
+## Tool reference (48 tools)
 
-### 1. Project & Workspace Safety (5 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 1. Project and workspace safety (5 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `project_init_workspace` | `path`, `name`, `create` | Register and activate a sandboxed model directory before any file read/write/run. |
-| `project_inspect` | `workspace` | Detect installed Delft3D version/layout and inventory all `.mdf`, `.mdw`, `.grd`, `.dep`, `.inp`, `.dat` files. |
-| `project_list_files` | `pattern`, `workspace` | Glob search files inside the active sandboxed workspace. |
-| `project_backup` | `file_path` (`"*"` to list), `label` | Snapshot a file into `.d3d_mcp_backups/<timestamp>/` or list existing snapshots. |
-| `project_rollback` | `snapshot_id` | Atomically restore model files from a backup snapshot ID. |
+| `project_init_workspace` | `path`, `name`, `create` | Registers and activates a sandboxed project folder. |
+| `project_inspect` | `workspace` | Reports the detected Delft3D version/layout and lists `.mdf`, `.mdw`, `.grd`, `.dep`, `.inp`, and `.dat` files. |
+| `project_list_files` | `pattern`, `workspace` | Lists files matching a glob pattern inside the workspace. |
+| `project_backup` | `file_path` (`"*"` to list), `label` | Saves a timestamped snapshot in `.d3d_mcp_backups/` or lists existing backups. |
+| `project_rollback` | `snapshot_id` | Restores files from a saved backup snapshot. |
 
-### 2. Grid Generation & RGFGRID Parity (10 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 2. Grid generation and RGFGRID tools (10 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `grid_inspect` | `grd_path` | Read `.grd` dimensions `(m_max, n_max)`, coordinate system, and spatial bounding box. |
-| `grid_create_rect` | `out_grd_path`, `x0`, `y0`, `dx`, `dy`, `m_max`, `n_max`, `angle_deg` | Generate a structured rectangular or rotated curvilinear `.grd` mesh. |
-| `grid_create_curvilinear` | `out_grd_path`, `south`, `north`, `m_max`, `n_max`, `west`, `east`, `ortho_iterations` | Generate a boundary-fitted curvilinear grid from 2 opposing splines or 4 curves via **TFI + Winslow Elliptic smoothing**. |
-| `grid_orthogonalize` | `src_grd_path`, `dst_grd_path`, `iterations`, `omega` | Run Winslow elliptic orthogonalization on an existing `.grd` to reduce `|cos(theta)| < 0.04`. |
-| `grid_refine` | `src_grd_path`, `dst_grd_path`, `factor_m`, `factor_n` | Sub-divide grid cells by `(factor_m, factor_n)` via bilinear refinement. |
-| `grid_check_quality` | `grd_path` | Compute parallel RGFGRID quality metrics: max/mean orthogonality cosine, M/N smoothness, aspect ratio, min/max `dx`/`dy`. |
-| `grid_transform_or_mask` | `src_grd_path`, `dx`, `dy`, `scale_x`, `scale_y`, `rotate_deg`, `mask_block`, `mask_interior` | Shift, scale, or rotate a grid, or delete interior/exterior nodes in `[m1, m2, n1, n2]`. |
-| `grid_edit_enclosure` | `enc_path`, `points` | Read or write a `.enc` computational grid enclosure polygon. |
-| `grid_tekal_io` | `tekal_path`, `action` (`read`/`write`/`import_geojson`), `features`, `geojson_path` | Read/write RGFGRID TEKAL files (`.ldb`, `.spl`, `.pol`) or convert directly from GIS GeoJSON. |
-| `grid_export_geojson` | `grd_path`, `out_geojson_path`, `stride` | Export `.grd` mesh lines to GeoJSON for QGIS/GIS visualization. |
+| `grid_inspect` | `grd_path` | Reads `.grd` dimensions `(m_max, n_max)`, coordinate system, and bounding box. |
+| `grid_create_rect` | `out_grd_path`, `x0`, `y0`, `dx`, `dy`, `m_max`, `n_max`, `angle_deg` | Creates a rectangular or rotated `.grd` mesh. |
+| `grid_create_curvilinear` | `out_grd_path`, `south`, `north`, `m_max`, `n_max`, `west`, `east`, `ortho_iterations` | Builds a curvilinear grid from 2 opposing splines or 4 curves using TFI and Winslow elliptic smoothing. |
+| `grid_orthogonalize` | `src_grd_path`, `dst_grd_path`, `iterations`, `omega` | Smooths an existing `.grd` mesh to lower `|cos(theta)|` toward 0. |
+| `grid_refine` | `src_grd_path`, `dst_grd_path`, `factor_m`, `factor_n` | Subdivides grid cells by `(factor_m, factor_n)`. |
+| `grid_check_quality` | `grd_path` | Computes orthogonality cosine, M/N smoothness ratios, aspect ratio, and min/max `dx`/`dy`. |
+| `grid_transform_or_mask` | `src_grd_path`, `dx`, `dy`, `scale_x`, `scale_y`, `rotate_deg`, `mask_block`, `mask_interior` | Shifts, scales, or rotates a grid, or masks nodes inside/outside `[m1, m2, n1, n2]`. |
+| `grid_edit_enclosure` | `enc_path`, `points` | Reads or writes `.enc` enclosure polygons. |
+| `grid_tekal_io` | `tekal_path`, `action` (`read`/`write`/`import_geojson`), `features`, `geojson_path` | Reads/writes TEKAL files (`.ldb`, `.spl`, `.pol`) or imports them from GeoJSON. |
+| `grid_export_geojson` | `grd_path`, `out_geojson_path`, `stride` | Exports `.grd` grid lines to GeoJSON. |
 
-### 3. Bathymetry & QUICKIN Operations Parity (5 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 3. Bathymetry and QUICKIN tools (5 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `bathy_inspect` | `dep_path`, `grd_path` | Inspect `.dep` matrix (raw or `MNKmax`-padded) and compute valid/missing/min/max/mean depth statistics. |
-| `bathy_interpolate_xyz` | `grd_path`, `xyz_path`, `out_dep_path`, `method` (`idw`/`nearest`/`cell_average`/`tin`), `flow_pad` | Interpolate scatter `.xyz` soundings onto `.grd` with optional automatic `-999.0` border padding for FLOW. |
-| `bathy_smooth_or_fill` | `dep_path`, `grd_path`, `iterations`, `fill_only` | Fill `-999.0` missing depth gaps or apply iterative Laplace bathymetry smoothing. |
-| `bathy_edit_region` | `dep_path`, `grd_path`, `m_range`, `n_range`, `operation` (`set`/`add`/`scale`), `value` | Modify bathymetry values inside a sub-grid index box. |
-| `bathy_operations` | `action` (`volumes_areas`/`combine`/`samples_from_tekal`), `dep_path`, `grd_path`, `second_dep_path`, `combine_op`, `z_ref` | Full QUICKIN `Operations` parity: wet surface area & storage volume integration, combining two `.dep` files, or generating `.xyz` samples from TEKAL polylines. |
+| `bathy_inspect` | `dep_path`, `grd_path` | Reads `.dep` files (raw or `MNKmax`-padded) and returns valid/missing counts and depth stats. |
+| `bathy_interpolate_xyz` | `grd_path`, `xyz_path`, `out_dep_path`, `method` (`idw`/`nearest`/`cell_average`/`tin`), `flow_pad` | Interpolates `.xyz` soundings onto `.grd`, optionally adding `-999.0` FLOW border padding. |
+| `bathy_smooth_or_fill` | `dep_path`, `grd_path`, `iterations`, `fill_only` | Fills `-999.0` gaps or smooths active depth nodes via Laplace relaxation. |
+| `bathy_edit_region` | `dep_path`, `grd_path`, `m_range`, `n_range`, `operation` (`set`/`add`/`scale`), `value` | Edits depths within a 1-based `[m1, m2] x [n1, n2]` region. |
+| `bathy_operations` | `action` (`volumes_areas`/`combine`/`samples_from_tekal`), `dep_path`, `grd_path`, `second_dep_path`, `combine_op`, `z_ref` | Computes wet surface area and water volume, combines two `.dep` files, or converts TEKAL polylines to `.xyz` samples. |
 
-### 4. Delft3D-FLOW, Transport & Morphology (7 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 4. Delft3D-FLOW and morphology (7 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `flow_read_mdf` | `mdf_path` | Parse `.mdf` into structured key-values and list all referenced attribute files. |
-| `flow_update_mdf` | `mdf_path`, `updates` | Losslessly update or create `.mdf` keywords while preserving comments and type formatting. |
-| `flow_set_boundaries` | `bnd_path`, `boundaries`, `bct_path`, `bct_tables`, `bcc_path`, `bch_path`, `src_path`, `dis_path`, `mdf_path` | Generate `.bnd`, `.bct` (time-series), `.bcc` (salinity/temp/sediment), `.bch` (harmonic), and `.src`/`.dis` (discharges) and link to `.mdf`. |
-| `flow_set_obs_crs` | `obs_path`, `stations`, `crs_path`, `cross_sections`, `wnd_path`, `wind_records` | Write observation stations (`.obs`), monitoring cross-sections (`.crs`), and uniform wind series (`.wnd`). |
-| `flow_set_thin_dams_dry` | `dry_path`, `dry_points`, `thd_path`, `thin_dams` | Write permanently dry cell points (`.dry`) and U/V thin dams (`.thd`). |
-| `flow_config_morphology` | `mor_path`, `mor_sections`, `sed_path`, `sed_sections` | Read or write morphology (`.mor`) and sediment fraction (`.sed`) files. |
-| `flow_setup_dd` | `ddb_path`, `links` | Generate Domain Decomposition (`.ddb`) multi-grid coupling definitions. |
+| `flow_read_mdf` | `mdf_path` | Parses `.mdf` keywords and referenced sub-files. |
+| `flow_update_mdf` | `mdf_path`, `updates` | Updates or adds `.mdf` keywords while keeping comments intact. |
+| `flow_set_boundaries` | `bnd_path`, `boundaries`, `bct_path`, `bct_tables`, `bcc_path`, `bch_path`, `src_path`, `dis_path`, `mdf_path` | Writes `.bnd`, `.bct`, `.bcc`, `.bch`, and `.src`/`.dis` files and links them into `.mdf`. |
+| `flow_set_obs_crs` | `obs_path`, `stations`, `crs_path`, `cross_sections`, `wnd_path`, `wind_records` | Writes observation points (`.obs`), cross-sections (`.crs`), and uniform wind (`.wnd`). |
+| `flow_set_thin_dams_dry` | `dry_path`, `dry_points`, `thd_path`, `thin_dams` | Writes dry cell points (`.dry`) and U/V thin dams (`.thd`). |
+| `flow_config_morphology` | `mor_path`, `mor_sections`, `sed_path`, `sed_sections` | Reads or writes morphology (`.mor`) and sediment (`.sed`) files. |
+| `flow_setup_dd` | `ddb_path`, `links` | Generates Domain Decomposition (`.ddb`) coupling files. |
 
-### 5. WAVE (SWAN), WAQ, PART, TIDE, WES & RTC (5 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 5. WAVE, WAQ, PART, TIDE, WES, and RTC (5 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `wave_read_write_mdw` | `mdw_path`, `sections` | Read or write Delft3D-WAVE (`.mdw`) spectral wave configuration files. |
-| `waq_edit_inp` | `inp_path`, `section_updates` | Inspect or update numbered blocks (`#1`..`#10`) in a Delft3D-WAQ `.inp` file. |
-| `waq_list_processes` | `query`, `limit` | Search available water-quality substances and processes in `proctabl.d3d`. |
-| `part_edit_inp` | `inp_path`, `params` | Generate or update Delft3D-PART particle tracking input files (`.inp`/`.par`). |
-| `tide_wes_generate` | `tool_kind` (`wes`/`tide`/`rtc`/`harmonic_fit`), `out_path`, `params` | Generate cyclone spiderweb wind (`WES`), `TIDE`, or `RTC` configs, or run least-squares tidal harmonic decomposition & prediction (`M2`, `S2`, `N2`, `K2`, `K1`, `O1`, `P1`, `Q1`, `M4`, `MS4`). |
+| `wave_read_write_mdw` | `mdw_path`, `sections` | Reads or writes Delft3D-WAVE `.mdw` files. |
+| `waq_edit_inp` | `inp_path`, `section_updates` | Reads or replaces numbered sections (`#1` to `#10`) in Delft3D-WAQ `.inp` files. |
+| `waq_list_processes` | `query`, `limit` | Searches water-quality processes in `proctabl.d3d`. |
+| `part_edit_inp` | `inp_path`, `params` | Generates or updates Delft3D-PART `.inp`/`.par` files. |
+| `tide_wes_generate` | `tool_kind` (`wes`/`tide`/`rtc`/`harmonic_fit`), `out_path`, `params` | Writes `WES`, `TIDE`, or `RTC` configs, or runs least-squares tidal harmonic decomposition and prediction. |
 
-### 6. Native Simulation Runner & Async Job Manager (6 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 6. Simulation runner and job manager (6 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `sim_validate` | `input_path`, `module` (`flow`/`wave`) | Pre-run dry validator: checks missing referenced files, grid/depth dimension alignment, and Courant (**CFL**) number. |
-| `sim_start` | `mode` (`flow_single`, `flow_mpi`, `flow_wave_coupled`, `flow_dd`, `wave_standalone`, `waq`, `part`), `input_path`, `wave_mdw_path`, `num_procs` | Launch a non-blocking simulation job with automatic `config_d_hydro.xml` generation and MPI `-localonly` support. |
-| `sim_status` | `job_id` | Poll status (`running`, `completed`, `failed`, `stopped`), PIDs, and exit codes of managed jobs. |
-| `sim_tail_log` | `log_or_diag_path`, `tail_n` | High-speed Rust scanner for `tri-diag.*` / `*.mon` progress percentage, warnings, and errors. |
-| `sim_stop` | `job_id` | Safely terminate a running job and its child MPI/WAVE processes (protected by PID-reuse verification). |
-| `sim_run_utility` | `utility` (`agrhyd`, `ddcouple`, `mormerge`, `nesthd1`, `nesthd2`, `wes`, `tide_analysis`, `tide_predict`, `maptonetcdf`, `sim2ugrid`, `delft3d2shape`, `delwaq2raster`, `vs`, `plct`, `nestwq1`, `nestwq2`, `waqmerge`, `triana`), `work_dir_path`, `args` | Run any Delft3D CLI utility synchronously with isolated environment injection. |
+| `sim_validate` | `input_path`, `module` (`flow`/`wave`) | Checks missing file references, `MNKmax` vs `.grd`/`.dep` sizes, and estimated Courant (CFL) numbers. |
+| `sim_start` | `mode` (`flow_single`, `flow_mpi`, `flow_wave_coupled`, `flow_dd`, `wave_standalone`, `waq`, `part`), `input_path`, `wave_mdw_path`, `num_procs` | Starts a non-blocking run, writes `config_d_hydro.xml`, and configures MPI `-localonly` when needed. |
+| `sim_status` | `job_id` | Returns status (`running`, `completed`, `failed`, `stopped`), PIDs, and exit codes. |
+| `sim_tail_log` | `log_or_diag_path`, `tail_n` | Scans `tri-diag.*` or `*.mon` files for progress lines, warnings, and errors. |
+| `sim_stop` | `job_id` | Stops a running job and its child MPI/WAVE processes after verifying process names. |
+| `sim_run_utility` | `utility` (`agrhyd`, `ddcouple`, `mormerge`, `nesthd1`, `nesthd2`, `wes`, `tide_analysis`, `tide_predict`, `maptonetcdf`, `sim2ugrid`, `delft3d2shape`, `delwaq2raster`, `vs`, `plct`, `nestwq1`, `nestwq2`, `waqmerge`, `triana`, `kubint`, `lint`, `datsel`), `work_dir_path`, `args` | Runs short Delft3D CLI utilities synchronously. |
 
-### 7. Native NEFIS Post-Processing, NetCDF & Validation (6 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 7. NEFIS post-processing, NetCDF, and skill checks (6 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `post_list_nefis_vars` | `dat_path`, `def_path` | List all groups (`map-series`, `his-series`, `map-const`, etc.), dimensions, and element names inside a NEFIS `.dat`/`.def` pair. |
-| `post_extract_timeseries` | `dat_path`, `group_name`, `element_name`, `vd_start`, `vd_end` | Extract station/cross-section time-series arrays (e.g. `ZWL`, `ZCURU`, `CTR`) from `trih-*` in microseconds via Rust `memmap2`. |
-| `post_extract_map_slice` | `dat_path`, `group_name`, `element_name`, `time_index` | Extract 2D/3D spatial field slices (e.g. `S1`, `U1`, `V1`, `DP0`, `HSIGN`) at a specific time step from `trim-*` or `wavm-*`. |
-| `post_convert_netcdf_gis` | `converter` (`nefis_to_netcdf`, `sim2ugrid`, `maptonetcdf`, `delwaq2raster`, `delft3d2shape`), `work_dir_path`, `args` | Export NEFIS `.dat`/`.def` directly to **CF-friendly NetCDF4 (`.nc`)** or invoke Deltares GIS converters. |
-| `post_validate_skill` | `observed`, `simulated` | Compute hydrodynamic calibration metrics: **RMSE**, **MAE**, **Bias**, **Pearson $r$**, **Nash-Sutcliffe Efficiency (NSE)**, and **Willmott Index of Agreement ($d$)**. |
-| `post_plot_snapshot` | `plot_kind` (`grid_bathy`/`timeseries`), `out_png_path`, `grd_path`, `dep_path`, `times`, `values` | Render publication-ready 150-DPI PNG plots of curvilinear meshes, bathymetry contours, or time series headlessly. |
+| `post_list_nefis_vars` | `dat_path`, `def_path` | Lists groups, dimensions, and elements inside a NEFIS `.dat`/`.def` file pair. |
+| `post_extract_timeseries` | `dat_path`, `group_name`, `element_name`, `vd_start`, `vd_end` | Extracts time-series arrays (such as `ZWL`, `ZCURU`, `CTR`) from `trih-*` files. |
+| `post_extract_map_slice` | `dat_path`, `group_name`, `element_name`, `time_index` | Extracts spatial slices (`S1`, `U1`, `V1`, `DP0`, `HSIGN`) at a chosen time step from `trim-*` or `wavm-*`. |
+| `post_convert_netcdf_gis` | `converter` (`nefis_to_netcdf`, `sim2ugrid`, `maptonetcdf`, `delwaq2raster`, `delft3d2shape`), `work_dir_path`, `args` | Exports NEFIS data directly to NetCDF4 (`.nc`) or runs Deltares GIS/UGRID converters. |
+| `post_validate_skill` | `observed`, `simulated` | Calculates RMSE, MAE, bias, Pearson `r`, Nash-Sutcliffe efficiency (NSE), and Willmott `d`. |
+| `post_plot_snapshot` | `plot_kind` (`grid_bathy`/`timeseries`), `out_png_path`, `grd_path`, `dep_path`, `times`, `values` | Saves 150-DPI PNG plots of grids, bathymetry, or time series headlessly. |
 
-### 8. Smart Windows Desktop GUI Bridge (4 Tools)
-| Tool Name | Key Parameters | Purpose & Practical Usage |
+### 8. Windows desktop GUI bridge (4 tools)
+| Tool | Key parameters | What it does |
 | :--- | :--- | :--- |
-| `gui_launch_module` | `module` (`menu`, `rgfgrid`, `quickin`, `dido`, `flow_gui`, `wave_gui`, `waq_gui`, `part_gui`, `quickplot`, `vsi`), `work_dir_path`, `target_file` | Launch any Delft3D desktop GUI application with proper `QT_PLUGIN_PATH` and `WL_PLUGINS_HOME` environment variables. |
-| `gui_list_windows` | `inspect_qt5_hwnd` | Enumerate open Delft3D HWNDs and inspect their live Qt5 UI Automation tree (`MenuBar`, `ToolBar`, `Button`, `CheckBox`, `StatusBar`). |
-| `gui_ui_action` | `hwnd`, `backend` (`qt5`/`tcltk`), `action` (`menu_select`, `click_button`, `set_text`, `send_keys`, `read_status_bar`, `canvas_click_points`, `canvas_drag`, `close`) | Trigger menus, toggle toolbar buttons (`uia_toggle`/`uia_invoke`), read live cursor coordinates from the status bar, or draw on the OpenGL canvas. |
-| `gui_capture_screenshot` | `out_png_path`, `hwnd`, `title_contains` | Capture crisp PNG screenshots of Qt5/OpenGL Delft3D windows using Win32 `PrintWindow (PW_RENDERFULLCONTENT)` with `mss` fallback. |
+| `gui_launch_module` | `module` (`menu`, `rgfgrid`, `quickin`, `dido`, `flow_gui`, `wave_gui`, `waq_gui`, `part_gui`, `quickplot`, `vsi`), `work_dir_path`, `target_file` | Launches a Delft3D GUI program with the required Qt and plugin environment variables. |
+| `gui_list_windows` | `inspect_qt5_hwnd` | Lists open Delft3D windows and optionally dumps the Qt5 UI Automation tree. |
+| `gui_ui_action` | `hwnd`, `backend` (`qt5`/`tcltk`), `action` (`menu_select`, `click_button`, `click_screen_point`, `set_text`, `send_keys`, `read_status_bar`, `canvas_click_points`, `canvas_drag`, `close`) | Runs menu items, toggles toolbar buttons, reads the cursor status bar, or clicks/drags on the OpenGL canvas. |
+| `gui_capture_screenshot` | `out_png_path`, `hwnd`, `title_contains` | Captures a Delft3D window to PNG via Win32 `PrintWindow` with `mss` fallback. |
 
----
+## Security
 
-## Security & Operational Guarantees
+Every path is resolved and checked with `Path.is_relative_to(workspace_root)` before reading or writing. System locations (`C:\Windows`, `C:\Program Files`, drive roots like `C:\`, and the Delft3D install directory) are blocked from workspace registration. Process termination checks executable names against a kernel allowlist (`d_hydro.exe`, `mpiexec.exe`, `wave.exe`, `delwaq.exe`, `delpar.exe`) to avoid killing unrelated programs on PID reuse. No Deltares binaries or GPL files are bundled in this repository.
 
-- **Sandboxed File Operations**: Every path passed to any tool is canonicalized via `Path.resolve()` and verified with `.is_relative_to(workspace_root)`. System folders (`C:\Windows`, `C:\Program Files`, drive roots `C:\`/`D:\`, and the Delft3D installation folder) cannot be registered as writable workspaces.
-- **PID-Reuse Process Protection**: Background job termination verifies that the target Windows PID matches an allowlisted Delft3D kernel binary name (`d_hydro.exe`, `mpiexec.exe`, `wave.exe`, `delwaq.exe`, `delpar.exe`) before sending termination signals.
-- **Zero Proprietary Bundling**: This package contains original integration code only and dynamically invokes the user's local Delft3D installation.
+## Author and license
 
----
-
-## Author & License
-
-- **Author**: Diky Dwi Anggara Permadi ([@dikydwi442-byte](https://github.com/dikydwi442-byte))
-- **License**: [MIT License](LICENSE)
+Maintained by Diky Dwi Anggara Permadi ([@dikydwi442-byte](https://github.com/dikydwi442-byte)) under the [MIT License](LICENSE).
