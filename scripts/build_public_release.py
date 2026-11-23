@@ -136,10 +136,9 @@ def build_public_release(repo_root: Path) -> dict[str, object]:
         if src_doc.exists():
             shutil.copy2(src_doc, dist_pub / doc_name)
 
-    banner_src = repo_root / "assets" / "banner.svg"
-    if banner_src.exists():
-        (dist_pub / "assets").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(banner_src, dist_pub / "assets" / "banner.svg")
+    assets_src = repo_root / "assets"
+    if assets_src.exists():
+        shutil.copytree(assets_src, dist_pub / "assets", dirs_exist_ok=True)
 
     installer_ps1 = dist_pub / "install_public.ps1"
     installer_ps1.write_text(

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="delft3d-mcp logo" width="128"/>
+  <img src="assets/logo.png" alt="delft3d-mcp logo" width="128"/>
 </p>
 
 <h1 align="center">delft3d-mcp</h1>
