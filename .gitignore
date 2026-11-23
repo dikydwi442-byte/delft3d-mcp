@@ -1,0 +1,36 @@
+# Python / uv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+*.pyd
+*.so
+
+# Rust
+target/
+Cargo.lock
+
+# Delft3D runtime / simulation outputs & backups
+*.dat
+*.def
+*.nc
+*.log
+tri-diag.*
+TMP_*
+.d3d_mcp_backups/
+.d3d_mcp_jobs/
+logs/
+
+# OS / IDE / Env
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.vscode/

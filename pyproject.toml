@@ -1,0 +1,63 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "delft3d-mcp"
+version = "0.1.0"
+description = "Production-grade Hybrid Polyglot MCP server for Deltares Delft3D 4.07.02 on Windows"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Diky Dwi Anggara Permadi" }]
+dependencies = [
+    "fastmcp>=2.10,<5.0",
+    "matplotlib>=3.9",
+    "mss>=9.0",
+    "netCDF4>=1.7.2",
+    "numpy>=2.0",
+    "pillow>=10.0",
+    "psutil>=6.0",
+    "pydantic>=2.9",
+    "pywin32>=308; sys_platform == 'win32'",
+    "pywinauto>=0.6.9; sys_platform == 'win32'",
+    "scipy>=1.14",
+    "xarray>=2024.9",
+]
+
+[project.scripts]
+delft3d-mcp = "delft3d_mcp.__main__:main"
+
+[dependency-groups]
+dev = [
+    "maturin>=1.7,<2.0",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[tool.maturin]
+manifest-path = "crates/delft3d_core/Cargo.toml"
+python-source = "src"
+module-name = "delft3d_mcp._core"
+features = ["extension-module"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
