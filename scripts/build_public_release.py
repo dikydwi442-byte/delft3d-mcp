@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import compileall
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,11 @@ def build_public_release(repo_root: Path) -> dict[str, object]:
     dist_raw.mkdir(parents=True, exist_ok=True)
     dist_pub.mkdir(parents=True, exist_ok=True)
 
+    env = os.environ.copy()
+    cargo_bin = Path.home() / ".cargo" / "bin"
+    if cargo_bin.exists():
+        env["PATH"] = f"{cargo_bin}{os.pathsep}{env.get('PATH', '')}"
+
     # 1. Build release wheel via maturin (Rust compiled with strip=true, lto=thin)
     subprocess.run(
         [
@@ -37,6 +43,7 @@ def build_public_release(repo_root: Path) -> dict[str, object]:
             str(dist_raw),
         ],
         cwd=str(repo_root),
+        env=env,
         check=True,
     )
 
@@ -123,11 +130,16 @@ def build_public_release(repo_root: Path) -> dict[str, object]:
             f"Source leak detected in public wheel! rs={rs_files}, py={leaked_py}, pyd={pyd_files}"
         )
 
-    # Copy public companion docs & 1-click installer
+    # Copy public companion docs & assets
     for doc_name in ("README.md", "LICENSE", "SECURITY.md", "CHANGELOG.md"):
         src_doc = repo_root / doc_name
         if src_doc.exists():
             shutil.copy2(src_doc, dist_pub / doc_name)
+
+    banner_src = repo_root / "assets" / "banner.svg"
+    if banner_src.exists():
+        (dist_pub / "assets").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(banner_src, dist_pub / "assets" / "banner.svg")
 
     installer_ps1 = dist_pub / "install_public.ps1"
     installer_ps1.write_text(
